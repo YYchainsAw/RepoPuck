@@ -10,6 +10,7 @@ import {
   SyncIcon,
 } from "@primer/octicons-react";
 import { Button, IconButton, Spinner } from "@primer/react";
+import type { RefObject } from "react";
 import type { RepositorySnapshot } from "../git/types";
 
 interface HeaderProps {
@@ -18,6 +19,7 @@ interface HeaderProps {
   pinned: boolean;
   dark: boolean;
   menuOpen: boolean;
+  menuButtonRef: RefObject<HTMLButtonElement | null>;
   onChooseRepository(): void;
   onSwitchBranch(branch: string): void;
   onCreateBranch(): void;
@@ -33,6 +35,7 @@ export function Header({
   pinned,
   dark,
   menuOpen,
+  menuButtonRef,
   onChooseRepository,
   onSwitchBranch,
   onCreateBranch,
@@ -72,10 +75,12 @@ export function Header({
             onClick={onToggleTheme}
           />
           <IconButton
+            ref={menuButtonRef}
             icon={KebabHorizontalIcon}
             unsafeDisableTooltip
             aria-label="More actions"
             aria-expanded={menuOpen}
+            aria-haspopup="menu"
             variant="invisible"
             disabled={busy}
             onClick={onToggleMenu}
@@ -106,7 +111,7 @@ export function Header({
           onClick={onCreateBranch}
         />
         <span className="branch-sync" title="Remote divergence">
-          ↑{snapshot.ahead} ↓{snapshot.behind}
+          Ahead {snapshot.ahead}, behind {snapshot.behind}
         </span>
         <IconButton
           icon={busy ? Spinner : SyncIcon}

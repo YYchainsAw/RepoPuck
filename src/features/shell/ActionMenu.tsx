@@ -9,7 +9,14 @@ import {
   UploadIcon,
 } from "@primer/octicons-react";
 import { Dialog } from "@primer/react";
-import { useState, type ComponentType } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ComponentType,
+  type KeyboardEvent,
+  type RefObject,
+} from "react";
 
 interface MenuAction {
   label: string;
@@ -20,6 +27,7 @@ interface MenuAction {
 interface ActionMenuProps {
   open: boolean;
   busy: boolean;
+  triggerRef: RefObject<HTMLButtonElement | null>;
   onClose(): void;
   actions: {
     fetch(): void;
@@ -31,9 +39,15 @@ interface ActionMenuProps {
   };
 }
 
-export function ActionMenu({ open, busy, onClose, actions }: ActionMenuProps) {
+export function ActionMenu({
+  open,
+  busy,
+  triggerRef,
+  onClose,
+  actions,
+}: ActionMenuProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
-  if (!open && !settingsOpen) return null;
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const items: MenuAction[] = [
     { label: "Fetch", icon: SyncIcon, run: actions.fetch },
@@ -44,20 +58,89 @@ export function ActionMenu({ open, busy, onClose, actions }: ActionMenuProps) {
     { label: "Open Explorer", icon: FileDirectoryIcon, run: actions.openExplorer },
   ];
 
+  const getEnabledItems = () =>
+    Array.from(
+      menuRef.current?.querySelectorAll<HTMLButtonElement>(
+        '[role="menuitem"]:not(:disabled)',
+      ) ?? [],
+    );
+
+  const closeAndRestoreFocus = () => {
+    onClose();
+    triggerRef.current?.focus();
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    getEnabledItems()[0]?.focus();
+
+    const closeForOutsideInteraction = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (
+        !menuRef.current?.contains(target) &&
+        !triggerRef.current?.contains(target)
+      ) {
+        onClose();
+        triggerRef.current?.focus();
+      }
+    };
+    const closeForEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", closeForOutsideInteraction);
+    document.addEventListener("keydown", closeForEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeForOutsideInteraction);
+      document.removeEventListener("keydown", closeForEscape);
+    };
+  }, [onClose, open, triggerRef]);
+
+  if (!open && !settingsOpen) return null;
+
+  const moveFocus = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!new Set(["ArrowDown", "ArrowUp", "Home", "End"]).has(event.key)) {
+      return;
+    }
+    event.preventDefault();
+    const enabledItems = getEnabledItems();
+    const currentIndex = enabledItems.indexOf(document.activeElement as HTMLButtonElement);
+    let nextIndex = 0;
+    if (event.key === "End") nextIndex = enabledItems.length - 1;
+    else if (event.key === "ArrowDown") nextIndex = (currentIndex + 1) % enabledItems.length;
+    else if (event.key === "ArrowUp") {
+      nextIndex = (currentIndex - 1 + enabledItems.length) % enabledItems.length;
+    }
+    enabledItems.forEach((item, index) => {
+      item.tabIndex = index === nextIndex ? 0 : -1;
+    });
+    enabledItems[nextIndex]?.focus();
+  };
+
   return (
     <>
       {open && (
-        <div className="action-menu" role="menu" aria-label="Repository actions">
-          {items.map(({ label, icon: Icon, run }) => (
+        <div
+          ref={menuRef}
+          className="action-menu"
+          role="menu"
+          aria-label="Repository actions"
+          onKeyDown={moveFocus}
+        >
+          {items.map(({ label, icon: Icon, run }, index) => (
             <button
               key={label}
               className="action-menu-item"
               type="button"
               role="menuitem"
+              tabIndex={index === 0 ? 0 : -1}
               disabled={busy}
               onClick={() => {
                 run();
-                onClose();
+                closeAndRestoreFocus();
               }}
             >
               <Icon size={16} aria-hidden="true" />
@@ -72,6 +155,7 @@ export function ActionMenu({ open, busy, onClose, actions }: ActionMenuProps) {
             className="action-menu-item"
             type="button"
             role="menuitem"
+            tabIndex={-1}
             disabled
             aria-describedby="amend-unavailable"
           >
@@ -83,6 +167,7 @@ export function ActionMenu({ open, busy, onClose, actions }: ActionMenuProps) {
             className="action-menu-item"
             type="button"
             role="menuitem"
+            tabIndex={-1}
             disabled={busy}
             onClick={() => {
               setSettingsOpen(true);

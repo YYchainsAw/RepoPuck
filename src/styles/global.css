@@ -87,8 +87,8 @@ body {
 
 .header-actions button,
 .branch-row button {
-  min-height: 36px;
-  min-width: 36px;
+  min-height: var(--panel-control-height);
+  min-width: var(--panel-control-height);
 }
 
 .branch-row {
@@ -97,7 +97,7 @@ body {
   border-radius: 8px;
   gap: 8px;
   margin-top: 12px;
-  min-height: 40px;
+  min-height: var(--panel-control-height);
   padding: 0 4px 0 12px;
 }
 
@@ -109,6 +109,7 @@ body {
   flex: 1 1 auto;
   font: inherit;
   min-width: 0;
+  min-height: var(--panel-control-height);
   outline: 0;
   padding: 8px 0;
 }
@@ -144,7 +145,7 @@ body {
   font: inherit;
   gap: 10px;
   grid-template-columns: 18px 1fr auto;
-  min-height: 36px;
+  min-height: var(--panel-control-height);
   padding: 6px 8px;
   text-align: left;
 }
@@ -292,6 +293,12 @@ body {
 .repository-empty-state {
   color: var(--panel-muted);
   text-align: center;
+}
+
+.repository-empty-state button,
+.create-branch-form button,
+.create-branch-form input {
+  min-height: var(--panel-control-height);
 }
 
 .changes-empty {

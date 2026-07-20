@@ -1,5 +1,5 @@
 import { BaseStyles, Button, Dialog, Spinner, TextInput, ThemeProvider } from "@primer/react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChangeGroups } from "../git/ChangeGroups";
 import { CommitComposer } from "../git/CommitComposer";
 import { RepositoryEmptyState } from "../git/RepositoryEmptyState";
@@ -31,12 +31,13 @@ export function PanelShell() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [createBranchOpen, setCreateBranchOpen] = useState(false);
   const [branchName, setBranchName] = useState("");
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const busy = workspace.busyAction !== null;
+  const closeActionMenu = useCallback(() => setMenuOpen(false), []);
 
   useEffect(() => {
     const closeMenus = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setMenuOpen(false);
         setCreateBranchOpen(false);
       }
     };
@@ -58,6 +59,19 @@ export function PanelShell() {
     setBranchName("");
     setCreateBranchOpen(false);
   };
+
+  const feedback = (
+    <>
+      {workspace.notice && <Notice kind="success">{workspace.notice}</Notice>}
+      {workspace.error && <Notice kind="error">{workspace.error}</Notice>}
+      {workspace.busyAction && (
+        <div className="busy-status" aria-live="polite">
+          <Spinner size="small" />
+          <span>{busyLabels[workspace.busyAction]}</span>
+        </div>
+      )}
+    </>
+  );
 
   return (
     <ThemeProvider colorMode={dark ? "night" : "day"}>
@@ -81,6 +95,7 @@ export function PanelShell() {
                   pinned={pinned}
                   dark={dark}
                   menuOpen={menuOpen}
+                  menuButtonRef={menuButtonRef}
                   onChooseRepository={() => void chooseRepository()}
                   onSwitchBranch={(branch) => void workspace.switchBranch(branch)}
                   onCreateBranch={() => setCreateBranchOpen(true)}
@@ -92,7 +107,8 @@ export function PanelShell() {
                 <ActionMenu
                   open={menuOpen}
                   busy={busy}
-                  onClose={() => setMenuOpen(false)}
+                  triggerRef={menuButtonRef}
+                  onClose={closeActionMenu}
                   actions={{
                     fetch: () => void workspace.fetch(),
                     pull: () => void workspace.pull(),
@@ -102,15 +118,8 @@ export function PanelShell() {
                     openExplorer: () => void workspace.openExplorer(),
                   }}
                 />
-                {workspace.notice && <Notice kind="success">{workspace.notice}</Notice>}
-                {workspace.error && <Notice kind="error">{workspace.error}</Notice>}
-                {workspace.busyAction && (
-                  <div className="busy-status" aria-live="polite">
-                    <Spinner size="small" />
-                    <span>{busyLabels[workspace.busyAction]}</span>
-                  </div>
-                )}
               </div>
+              {feedback}
               <main className="changes-scroll" aria-label="Repository changes">
                 <ChangeGroups
                   changes={workspace.snapshot.changes}
@@ -128,7 +137,10 @@ export function PanelShell() {
               />
             </>
           ) : (
-            <RepositoryEmptyState busy={busy} onChoose={() => void chooseRepository()} />
+            <>
+              {feedback}
+              <RepositoryEmptyState busy={busy} onChoose={() => void chooseRepository()} />
+            </>
           )}
           {createBranchOpen && (
             <Dialog title="Create branch" onClose={() => setCreateBranchOpen(false)}>

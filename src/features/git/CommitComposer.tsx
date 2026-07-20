@@ -22,7 +22,7 @@ export function CommitComposer({
 }: CommitComposerProps) {
   const ready = message.trim().length > 0 && hasStaged && !busyAction;
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== "Enter" || !ready) return;
+    if (event.nativeEvent.isComposing || event.key !== "Enter" || !ready) return;
     event.preventDefault();
     if (event.ctrlKey) onCommitAndPush();
     else onCommit();

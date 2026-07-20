@@ -66,6 +66,28 @@ describe("CommitComposer", () => {
     expect(onCommitAndPush).toHaveBeenCalledTimes(1);
   });
 
+  it("does not submit while an IME composition is active", () => {
+    const onCommit = vi.fn();
+    const onCommitAndPush = vi.fn();
+    render(
+      <CommitComposer
+        message="候補"
+        hasStaged
+        busyAction={null}
+        onMessageChange={vi.fn()}
+        onCommit={onCommit}
+        onCommitAndPush={onCommitAndPush}
+      />,
+    );
+    const input = screen.getByRole("textbox", { name: "Commit message" });
+
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true, isComposing: true });
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCommitAndPush).not.toHaveBeenCalled();
+  });
+
   it.each([
     { message: "", hasStaged: true, busyAction: null },
     { message: "Ship it", hasStaged: false, busyAction: null },

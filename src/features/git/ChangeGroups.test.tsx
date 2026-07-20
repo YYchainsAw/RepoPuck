@@ -94,4 +94,73 @@ describe("ChangeGroups", () => {
       expect(checkbox).toBeDisabled();
     }
   });
+
+  it("moves a staged untracked file from Unversioned files to Changes", () => {
+    const untracked = changes[2];
+    const { rerender } = render(
+      <ChangeGroups changes={[untracked]} busy={false} onSetStaged={vi.fn()} />,
+    );
+    expect(
+      screen.getByRole("heading", { name: "Unversioned files 1" }),
+    ).toBeInTheDocument();
+
+    rerender(
+      <ChangeGroups
+        changes={[{ ...untracked, staged: true }]}
+        busy={false}
+        onSetStaged={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Changes 1" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /Unversioned files/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("uses stable identities for index and worktree entries of the same path", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      render(
+        <ChangeGroups
+          changes={[
+            { ...changes[0], staged: true },
+            { ...changes[0], staged: false },
+          ]}
+          busy={false}
+          onSetStaged={vi.fn()}
+        />,
+      );
+      expect(consoleError.mock.calls.flat().join(" ")).not.toContain("same key");
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("deduplicates paths in group staging actions", () => {
+    const onSetStaged = vi.fn();
+    render(
+      <ChangeGroups
+        changes={[
+          { ...changes[0], staged: true },
+          { ...changes[0], staged: false },
+        ]}
+        busy={false}
+        onSetStaged={onSetStaged}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Stage all Changes" }));
+    expect(onSetStaged).toHaveBeenCalledWith([changes[0].path], true);
+  });
+
+  it("marks a partially staged group as mixed", () => {
+    render(<ChangeGroups changes={changes} busy={false} onSetStaged={vi.fn()} />);
+    const selectAll = screen.getByRole("checkbox", {
+      name: "Stage all Changes",
+    }) as HTMLInputElement;
+
+    expect(selectAll.indeterminate).toBe(true);
+    expect(selectAll).toHaveAttribute("aria-checked", "mixed");
+  });
 });
