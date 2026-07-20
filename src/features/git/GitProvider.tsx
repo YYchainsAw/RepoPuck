@@ -22,6 +22,12 @@ export interface GitProviderProps extends PropsWithChildren {
 const getErrorMessage = (reason: unknown) =>
   reason instanceof Error ? reason.message : String(reason);
 
+interface RefreshFlight {
+  client: GitClient;
+  generation: number;
+  promise: Promise<void>;
+}
+
 export function GitProvider({
   children,
   client: injectedClient,
@@ -38,66 +44,159 @@ export function GitProvider({
   const [commitMessage, setCommitMessage] = useState("");
   const [busyAction, setBusyAction] = useState<GitAction | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const busyRef = useRef<GitAction | null>(null);
+  const mountedRef = useRef(false);
+  const generationRef = useRef(0);
+  const inFlightRef = useRef<RefreshFlight | null>(null);
+  const clientRef = useRef(client);
+  const visibleRef = useRef(visible);
+  clientRef.current = client;
+  visibleRef.current = visible;
 
-  const refresh = useCallback(async () => {
-    try {
-      const nextSnapshot = await client.getSnapshot();
-      setSnapshot(nextSnapshot);
-      setSelectedRepository(nextSnapshot.repository);
-      setError(null);
-    } catch (reason) {
-      setError(getErrorMessage(reason));
+  const performRefresh = useCallback(
+    (targetClient: GitClient, generation: number): Promise<void> => {
+      const existing = inFlightRef.current;
+      if (
+        existing?.client === targetClient &&
+        existing.generation === generation
+      ) {
+        return existing.promise;
+      }
+
+      const isCurrent = () =>
+        mountedRef.current &&
+        visibleRef.current &&
+        clientRef.current === targetClient &&
+        generationRef.current === generation;
+      const flight: RefreshFlight = {
+        client: targetClient,
+        generation,
+        promise: Promise.resolve(),
+      };
+      flight.promise = Promise.resolve().then(async () => {
+        try {
+          const nextSnapshot = await targetClient.getSnapshot();
+          if (!isCurrent()) return;
+          setSnapshot(nextSnapshot);
+          setSelectedRepository(nextSnapshot.repository);
+          setRefreshError(null);
+        } catch (reason) {
+          if (!isCurrent()) return;
+          const message = getErrorMessage(reason);
+          if (/^No repository is selected[.!]?$/i.test(message)) {
+            setSnapshot(null);
+            setSelectedRepository(null);
+            setRefreshError(null);
+          } else {
+            setRefreshError(message);
+          }
+        } finally {
+          if (inFlightRef.current === flight) {
+            inFlightRef.current = null;
+          }
+        }
+      });
+      inFlightRef.current = flight;
+      return flight.promise;
+    },
+    [],
+  );
+
+  const refresh = useCallback((): Promise<void> => {
+    if (!mountedRef.current || !visibleRef.current) {
+      return Promise.resolve();
     }
-  }, [client]);
+    return performRefresh(clientRef.current, generationRef.current);
+  }, [performRefresh]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      generationRef.current += 1;
+      inFlightRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
+    generationRef.current += 1;
+    const generation = generationRef.current;
     if (!visible) return;
+
+    void performRefresh(client, generation);
 
     const timer = window.setInterval(() => {
       if (!busyRef.current) void refresh();
     }, 3_000);
-    return () => window.clearInterval(timer);
-  }, [refresh, visible]);
+    return () => {
+      window.clearInterval(timer);
+      if (generationRef.current === generation) {
+        generationRef.current += 1;
+      }
+    };
+  }, [client, performRefresh, refresh, visible]);
+
+  const refreshAfterMutation = useCallback(async () => {
+    const targetClient = clientRef.current;
+    const generation = generationRef.current;
+    const existing = inFlightRef.current;
+    if (
+      existing?.client === targetClient &&
+      existing.generation === generation
+    ) {
+      await existing.promise;
+    }
+    if (
+      mountedRef.current &&
+      visibleRef.current &&
+      clientRef.current === targetClient &&
+      generationRef.current === generation
+    ) {
+      await performRefresh(targetClient, generation);
+    }
+  }, [performRefresh]);
 
   const runMutation = useCallback(
     async (
       action: GitAction,
       operation: () => Promise<OperationResult>,
       clearCommitMessage = false,
+      refreshOnFailure = false,
     ): Promise<boolean> => {
       if (busyRef.current) return false;
 
       busyRef.current = action;
       setBusyAction(action);
-      setError(null);
+      setActionError(null);
       setNotice(null);
 
       try {
         const result = await operation();
         if (!result.success) {
-          setError(result.message ?? `${action} failed`);
+          const message = result.message ?? `${action} failed`;
+          setActionError(message);
+          if (refreshOnFailure) {
+            await refreshAfterMutation();
+            setActionError(message);
+          }
           return false;
         }
 
         if (clearCommitMessage) setCommitMessage("");
         setNotice(result.message ?? null);
-        await refresh();
+        await refreshAfterMutation();
         return true;
       } catch (reason) {
-        setError(getErrorMessage(reason));
+        setActionError(getErrorMessage(reason));
         return false;
       } finally {
         busyRef.current = null;
         setBusyAction(null);
       }
     },
-    [refresh],
+    [refreshAfterMutation],
   );
 
   const value = useMemo<GitWorkspaceValue>(
@@ -107,7 +206,7 @@ export function GitProvider({
       commitMessage,
       busyAction,
       notice,
-      error,
+      error: actionError ?? refreshError,
       refresh,
       setCommitMessage,
       selectRepository: (path) =>
@@ -123,6 +222,7 @@ export function GitProvider({
         runMutation(
           "commitAndPush",
           () => client.commitAndPush(commitMessage),
+          true,
           true,
         ),
       switchBranch: (branch) =>
@@ -141,9 +241,10 @@ export function GitProvider({
       busyAction,
       client,
       commitMessage,
-      error,
+      actionError,
       notice,
       refresh,
+      refreshError,
       runMutation,
       selectedRepository,
       snapshot,

@@ -39,9 +39,13 @@ describe("createGitClient", () => {
     const client = createGitClient({ runtime: "tauri" });
 
     await client.selectRepository("C:\\Projects\\repo");
+    await client.getSnapshot();
     await client.stage(["src/App.tsx"]);
     await client.unstage(["src/App.tsx"]);
+    await client.commit("Commit only");
+    await client.push();
     await client.commitAndPush("Ship it");
+    await client.checkout("main");
     await client.switchBranch("develop");
     await client.createBranch("feature/panel");
     await client.fetch();
@@ -52,9 +56,13 @@ describe("createGitClient", () => {
 
     expect(vi.mocked(invoke).mock.calls).toEqual([
       ["select_repository", { path: "C:\\Projects\\repo" }],
+      ["get_snapshot"],
       ["set_staged", { paths: ["src/App.tsx"], staged: true }],
       ["set_staged", { paths: ["src/App.tsx"], staged: false }],
+      ["commit", { message: "Commit only" }],
+      ["push"],
       ["commit_and_push", { message: "Ship it" }],
+      ["switch_branch", { branch: "main" }],
       ["switch_branch", { branch: "develop" }],
       ["create_branch", { branch: "feature/panel" }],
       ["fetch"],

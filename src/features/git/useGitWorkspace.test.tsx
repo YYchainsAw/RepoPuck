@@ -72,7 +72,7 @@ function createTestClient() {
   return client;
 }
 
-function createWrapper(client: GitClient, visible = false) {
+function createWrapper(client: GitClient, visible = true) {
   return function Wrapper({ children }: PropsWithChildren) {
     return (
       <GitProvider client={client} visible={visible}>
@@ -97,6 +97,30 @@ describe("useGitWorkspace", () => {
 
     expect(result.current.selectedRepository).toEqual(initialSnapshot.repository);
     expect(client.getSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats an initial missing repository as an empty state", async () => {
+    const client = createTestClient();
+    let rejectSnapshot!: (reason: Error) => void;
+    client.getSnapshot.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectSnapshot = reject;
+        }),
+    );
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(client.getSnapshot).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      rejectSnapshot(new Error("No repository is selected"));
+      await Promise.resolve();
+    });
+
+    expect(result.current.snapshot).toBeNull();
+    expect(result.current.selectedRepository).toBeNull();
+    expect(result.current.error).toBeNull();
   });
 
   it("stages checked paths and refreshes their state", async () => {
@@ -134,6 +158,33 @@ describe("useGitWorkspace", () => {
     expect(result.current.error).toBe("Nothing to commit");
   });
 
+  it("keeps an action error through background refresh until the next action", async () => {
+    const client = createTestClient();
+    client.commit.mockResolvedValueOnce({
+      success: false,
+      message: "Nothing to commit",
+    });
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    act(() => result.current.setCommitMessage("Keep this message"));
+    await act(async () => {
+      await result.current.commit();
+    });
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    expect(result.current.error).toBe("Nothing to commit");
+
+    await act(async () => {
+      await result.current.push();
+    });
+    expect(result.current.error).toBeNull();
+  });
+
   it("clears the commit message after a successful commit", async () => {
     const client = createTestClient();
     const { result } = renderHook(() => useGitWorkspace(), {
@@ -148,6 +199,53 @@ describe("useGitWorkspace", () => {
 
     expect(client.commit).toHaveBeenCalledWith("Ship it");
     expect(result.current.commitMessage).toBe("");
+  });
+
+  it("retains the message when a commit invocation rejects", async () => {
+    const client = createTestClient();
+    client.commit.mockRejectedValueOnce(new Error("Native bridge unavailable"));
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    act(() => result.current.setCommitMessage("Retry this commit"));
+    await act(async () => {
+      await result.current.commit();
+    });
+
+    expect(result.current.commitMessage).toBe("Retry this commit");
+    expect(result.current.error).toBe("Native bridge unavailable");
+  });
+
+  it("refreshes partial commit-and-push failure without clearing its message or error", async () => {
+    const client = createTestClient();
+    const committedSnapshot = {
+      ...cloneSnapshot(initialSnapshot),
+      ahead: 1,
+      changes: [],
+    };
+    client.getSnapshot
+      .mockResolvedValueOnce(cloneSnapshot(initialSnapshot))
+      .mockResolvedValueOnce(committedSnapshot);
+    client.commitAndPush.mockResolvedValueOnce({
+      success: false,
+      message: "Push failed after commit",
+    });
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    act(() => result.current.setCommitMessage("Commit before push"));
+    await act(async () => {
+      await result.current.commitAndPush();
+    });
+
+    expect(client.getSnapshot).toHaveBeenCalledTimes(2);
+    expect(result.current.snapshot).toEqual(committedSnapshot);
+    expect(result.current.commitMessage).toBe("Commit before push");
+    expect(result.current.error).toBe("Push failed after commit");
   });
 
   it("automatically refreshes after a successful mutation", async () => {
@@ -214,5 +312,126 @@ describe("useGitWorkspace", () => {
 
     unmount();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps slow polling refreshes single-flight", async () => {
+    vi.useFakeTimers();
+    const client = createTestClient();
+    let finishSnapshot!: (snapshot: RepositorySnapshot) => void;
+    const slowSnapshot = new Promise<RepositorySnapshot>((resolve) => {
+      finishSnapshot = resolve;
+    });
+    client.getSnapshot.mockImplementation(() => slowSnapshot);
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client, true),
+    });
+    await act(async () => Promise.resolve());
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(9_000);
+    });
+    expect(client.getSnapshot).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      finishSnapshot(cloneSnapshot(initialSnapshot));
+      await slowSnapshot;
+    });
+    expect(result.current.snapshot).toEqual(initialSnapshot);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expect(client.getSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores a pending refresh when the panel becomes hidden", async () => {
+    const client = createTestClient();
+    let finishSnapshot!: (snapshot: RepositorySnapshot) => void;
+    client.getSnapshot.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishSnapshot = resolve;
+        }),
+    );
+    let visible = true;
+    const wrapper = ({ children }: PropsWithChildren) => (
+      <GitProvider client={client} visible={visible}>
+        {children}
+      </GitProvider>
+    );
+    const { result, rerender } = renderHook(() => useGitWorkspace(), {
+      wrapper,
+    });
+    await waitFor(() => expect(client.getSnapshot).toHaveBeenCalledTimes(1));
+
+    visible = false;
+    rerender();
+    await act(async () => {
+      finishSnapshot(cloneSnapshot(initialSnapshot));
+      await Promise.resolve();
+    });
+
+    expect(result.current.snapshot).toBeNull();
+    expect(result.current.selectedRepository).toBeNull();
+  });
+
+  it("ignores a pending refresh from a replaced client", async () => {
+    const oldClient = createTestClient();
+    const newClient = createTestClient();
+    const newSnapshot = {
+      ...cloneSnapshot(initialSnapshot),
+      currentBranch: "develop",
+    };
+    let finishOldSnapshot!: (snapshot: RepositorySnapshot) => void;
+    oldClient.getSnapshot.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOldSnapshot = resolve;
+        }),
+    );
+    newClient.getSnapshot.mockResolvedValue(newSnapshot);
+    let activeClient: GitClient = oldClient;
+    const wrapper = ({ children }: PropsWithChildren) => (
+      <GitProvider client={activeClient}>{children}</GitProvider>
+    );
+    const { result, rerender } = renderHook(() => useGitWorkspace(), {
+      wrapper,
+    });
+    await waitFor(() => expect(oldClient.getSnapshot).toHaveBeenCalledTimes(1));
+
+    activeClient = newClient;
+    rerender();
+    await waitFor(() => expect(result.current.snapshot).toEqual(newSnapshot));
+
+    await act(async () => {
+      finishOldSnapshot(cloneSnapshot(initialSnapshot));
+      await Promise.resolve();
+    });
+    expect(result.current.snapshot).toEqual(newSnapshot);
+  });
+
+  it("settles a pending refresh safely after unmount", async () => {
+    const client = createTestClient();
+    let finishSnapshot!: (snapshot: RepositorySnapshot) => void;
+    let pendingSnapshot!: Promise<RepositorySnapshot>;
+    client.getSnapshot.mockImplementationOnce(() => {
+      pendingSnapshot = new Promise((resolve) => {
+        finishSnapshot = resolve;
+      });
+      return pendingSnapshot;
+    });
+    const { result, unmount } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client, true),
+    });
+    await waitFor(() => expect(client.getSnapshot).toHaveBeenCalledTimes(1));
+
+    unmount();
+    await act(async () => {
+      finishSnapshot(cloneSnapshot(initialSnapshot));
+      await pendingSnapshot;
+    });
+
+    expect(result.current.snapshot).toBeNull();
+    expect(result.current.selectedRepository).toBeNull();
   });
 });
