@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "tauri": "tauri",
     "test": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."
@@ -26,6 +27,7 @@
     "@eslint/js": "^9.36.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
+    "@tauri-apps/cli": "^2.7.0",
     "@types/node": "^22.15.3",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",

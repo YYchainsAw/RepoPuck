@@ -6,6 +6,7 @@ coverage/
 # Tauri and Rust output
 target/
 src-tauri/target/
+src-tauri/gen/
 
 # Local environment and editor files
 .env
