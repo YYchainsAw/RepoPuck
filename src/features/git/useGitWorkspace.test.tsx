@@ -176,6 +176,22 @@ describe("useGitWorkspace", () => {
     expect(result.current.commitMessage).toBe("");
   });
 
+  it("uses no-edit and clears an unchanged whitespace-only amend draft", async () => {
+    const client = createTestClient();
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    act(() => result.current.setCommitMessage("   "));
+    await act(async () => {
+      await result.current.amendLastCommit();
+    });
+
+    expect(client.amendLastCommit).toHaveBeenCalledWith(undefined);
+    expect(result.current.commitMessage).toBe("");
+  });
+
   it("keeps a newer draft while an amend is pending", async () => {
     const client = createTestClient();
     let finishAmend!: (result: OperationResult) => void;

@@ -284,7 +284,7 @@ export function GitProvider({
         return runMutation(
           "amendLastCommit",
           (targetClient) => targetClient.amendLastCommit(message),
-          message ? { submittedMessage } : {},
+          { submittedMessage },
         );
       },
       push: () => runMutation("push", (targetClient) => targetClient.push()),
