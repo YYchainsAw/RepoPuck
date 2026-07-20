@@ -55,7 +55,7 @@ jobs:
         run: pnpm typecheck
 
       - name: Test
-        run: pnpm exec vitest run
+        run: pnpm test
 
       - name: Build frontend
         run: pnpm build
@@ -85,8 +85,8 @@ jobs:
 
       - name: Run Clippy
         working-directory: src-tauri
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Run Rust tests
         working-directory: src-tauri
-        run: cargo test
+        run: cargo test --locked

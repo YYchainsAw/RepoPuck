@@ -1,6 +1,6 @@
 # RepoPuck architecture
 
-RepoPuck is a Windows desktop application built with Tauri 2, Rust, React, and TypeScript. Its main architectural rule is simple: the frontend describes user intent, while the Rust side owns access to repositories, Git processes, native windows, and persisted application settings.
+RepoPuck is a Windows desktop application built with Tauri 2, Rust, React, and TypeScript. Its main architectural rule is simple: the frontend describes user intent, while Rust owns access to repositories, Git processes, and native windows. Non-secret settings use a shared Tauri Store boundary: the frontend manages theme, pin, and recent-repository preferences, while Rust restores native state and persists puck position.
 
 ## System map
 
@@ -8,15 +8,17 @@ RepoPuck is a Windows desktop application built with Tauri 2, Rust, React, and T
 flowchart TD
     Panel["React panel"] --> Workspace["Git workspace state"]
     Puck["React puck"] --> NativeClient["Native shell client"]
-    Settings["Settings dialog"] --> NativeClient
+    Settings["Settings dialog"] --> ShellSettings["Shell settings state"]
+    Settings --> NativeClient
     Workspace --> GitClient["Typed GitClient"]
     GitClient -->|"browser"| Demo["In-memory demo client"]
     GitClient -->|"Tauri"| Invoke["Tauri invoke boundary"]
     NativeClient --> Invoke
+    ShellSettings --> Store["Tauri store"]
     Invoke --> Commands["Rust command adapters"]
     Commands --> GitService["Git service"]
     Commands --> Windowing["Window, tray, and positioning service"]
-    Commands --> Store["Tauri store"]
+    Commands --> Store
     GitService --> Git["System git executable"]
     Git --> Auth["Git Credential Manager or SSH"]
 ```
@@ -58,11 +60,11 @@ The Tauri command layer should remain thin. Git decisions belong in the service,
 ## Repository snapshot flow
 
 1. The panel requests a refresh through the workspace state.
-2. The Tauri client invokes `get_snapshot` with the selected repository.
-3. Rust validates the repository and runs stable, machine-readable Git commands.
+2. The Tauri client invokes `get_snapshot`; the command reads the repository previously selected into managed Rust state.
+3. Rust runs stable, machine-readable Git commands against that validated repository.
 4. Porcelain and numstat parsers create a repository snapshot containing branches, ahead/behind state, and change entries.
 5. The response crosses the Tauri boundary as camel-cased JSON and replaces the frontend snapshot only if it still belongs to the active repository/client generation.
-6. While visible, the panel performs a single-flight refresh approximately every three seconds. Mutations are serialized so a poll cannot race a conflicting operation.
+6. Each mounted panel or puck webview performs a single-flight refresh approximately every three seconds. Hiding a native window does not currently unmount its webview, so it can continue polling while hidden. Mutations are serialized so a poll cannot race a conflicting operation.
 
 ## Mutation flow
 
@@ -74,7 +76,7 @@ sequenceDiagram
     participant R as Rust Git service
     participant G as System Git
 
-    U->>W: stage, commit, push, or switch branch
+    U->>W: stage, commit, amend, push, or switch branch
     W->>W: acquire mutation guard
     W->>T: typed operation
     T->>R: invoke with structured arguments
@@ -86,7 +88,7 @@ sequenceDiagram
     W-->>U: updated state and notice/error
 ```
 
-The commit message is cleared only after a successful commit. A failed commit or a commit that succeeds followed by a failed push retains enough state and feedback for the user to recover deliberately.
+The submitted message is cleared only after a successful commit or Amend, and only if the user has not typed a newer draft while the operation was pending. A failed commit or Amend preserves its draft. A commit that succeeds followed by a failed push retains explicit feedback so the user can recover deliberately.
 
 ## Git execution and safety boundary
 
@@ -94,13 +96,13 @@ RepoPuck launches `git` directly with `std::process::Command` and a vector of ar
 
 Selected directories are validated with Git and canonicalized before becoming repository state. Machine-readable output is preferred (`--porcelain` and NUL-delimited records where applicable). Errors are converted into conservative, user-safe diagnostics; credential-bearing URLs, secrets, environment values, and unrelated process data must not cross into UI notices.
 
-The v0.1 command surface covers repository selection/status, staging, committing, pushing with upstream setup, local branch switching/creation, fetch, pull, stash, and opening the repository in Explorer or a terminal. Merge, rebase, cherry-pick, destructive reset, conflict editing, remote management, and broad history rewriting do not cross this boundary in v0.1.
+The v0.1 command surface covers repository selection/status, staging, committing, guarded single-commit Amend, pushing with upstream setup, local branch switching/creation, fetch, pull, stash, and opening the repository in Explorer or a terminal. Amend requires confirmation and never triggers an automatic or forced push. Merge, rebase, cherry-pick, destructive reset, conflict editing, remote management, and broader history rewriting do not cross this boundary in v0.1.
 
 ## Remote authentication
 
 RepoPuck has no GitHub sign-in flow. When Git contacts a remote, the system `git` process uses the same configured credential helper or SSH setup it uses in a terminal. RepoPuck does not receive or persist GitHub tokens, passwords, SSH private keys, or credential-helper payloads.
 
-This model intentionally supports GitHub, GitLab, self-hosted servers, and other Git remotes without adding provider-specific credential code. A remote operation can still fail if the user's terminal Git configuration cannot authenticate; RepoPuck reports a sanitized error and leaves credential repair to the system Git tooling.
+This model intentionally supports GitHub, GitLab, self-hosted servers, and other Git remotes without adding provider-specific credential code. The compact app does not host an interactive credential prompt. A remote operation can still fail if terminal Git cannot authenticate; RepoPuck reports a sanitized error and leaves credential setup or repair to system Git tooling.
 
 ## Native surfaces and lifecycle
 
@@ -120,8 +122,7 @@ The Tauri store contains only:
 - Theme preference (`system`, `light`, or `dark`).
 - Panel pin state.
 - Monitor-relative puck position.
-- Current repository path.
-- A bounded list of recent repository paths.
+- A bounded list of recent repository paths; the first entry is restored as the selected repository at startup.
 
 These values are local convenience settings, not credentials. The store must never contain remote passwords, access tokens, SSH keys, Git credential material, commit content, or repository file content.
 
@@ -130,8 +131,8 @@ These values are local convenience settings, not credentials. The store must nev
 - **Pure Rust tests** cover Git output parsing, argument construction, URL sanitization, and panel-positioning geometry.
 - **Temporary-repository Rust tests** exercise validation, staging, unstaging, commits, branch state, and upstream-push decisions without touching a real project.
 - **Vitest and Testing Library** cover client contracts, workspace concurrency/lifecycle behavior, component interactions, accessibility names, puck state, and settings.
-- **Browser end-to-end checks** use the in-memory client for the complete 420 × 720 interaction flow.
-- **Native smoke tests and visual QA** cover windows, tray behavior, monitor placement, light/dark states, and comparison with the approved design references.
+- **Manual browser-demo smoke checks** can exercise the in-memory client without touching a repository.
+- **Native smoke tests and visual QA** are release gates for windows, tray behavior, monitor placement, light/dark states, and comparison with the approved design references.
 
 Windows CI runs the deterministic frontend and Rust gates. Native packaging and visual QA remain explicit release gates because they require inspection of the produced Windows application, not just a successful unit-test job.
 
@@ -148,4 +149,4 @@ An operation is not complete until all layers agree:
 7. Add user feedback and recovery behavior, including preservation of useful state on failure.
 8. Run frontend, Rust, native smoke, and visual checks appropriate to the change.
 
-Operations that rewrite history, resolve conflicts, or manage credentials require a separate product and security design before implementation.
+Amend is the only approved v0.1 history rewrite and must retain its confirmation and no-force-push boundaries. Other operations that rewrite history, resolve conflicts, or manage credentials require a separate product and security design before implementation.

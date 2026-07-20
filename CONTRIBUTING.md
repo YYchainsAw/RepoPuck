@@ -37,7 +37,7 @@ Before requesting review, run:
 ```powershell
 pnpm lint
 pnpm typecheck
-pnpm exec vitest run
+pnpm test
 pnpm build
 
 Push-Location src-tauri
@@ -61,6 +61,7 @@ Code that launches Git has a higher review bar:
 - Treat stdout and stderr as untrusted text. User-facing diagnostics must not leak credentials, credential-bearing remote URLs, environment values, or sensitive process details.
 - Preserve the user's selected files and commit message after a failed operation.
 - Serialize conflicting mutations and refresh state after operations finish.
+- Treat Amend as an explicit history rewrite: require confirmation, preserve a failed draft, and never add an automatic or forced push.
 - Add temporary-repository tests for command construction and behavior. Never point tests at a contributor's working repository.
 
 RepoPuck delegates remote authentication to system Git. Contributions must not add GitHub login, token storage, password storage, SSH-key storage, or custom credential handling without an approved security design.
@@ -71,7 +72,7 @@ RepoPuck delegates remote authentication to system Git. Contributions must not a
 - Keep `Commit` and `Commit & Push` as distinct actions.
 - Use GitHub Primer components/tokens and Primer Octicons; do not add handcrafted SVG icons, emoji controls, gradients, or CSS-drawn brand marks.
 - Keep common actions visible and place safe secondary actions in the overflow menu.
-- Do not add merge, rebase, cherry-pick, destructive reset, conflict editing, remote management, or broad history-rewriting workflows to v0.1.
+- Do not add merge, rebase, cherry-pick, destructive reset, conflict editing, remote management, or history-rewriting workflows beyond the approved single-commit Amend flow to v0.1.
 - Maintain accessible names, visible focus states, keyboard behavior, ellipsis/title handling for long paths, and usable error feedback.
 
 ## Pull requests

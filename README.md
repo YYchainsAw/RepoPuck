@@ -12,11 +12,12 @@ RepoPuck is currently a pre-release v0.1 project. Development happens on the `de
 - Repository selection, status refresh, tracked/untracked change groups, and per-file staging.
 - Local branch switching and branch creation.
 - Separate `Commit` and `Commit & Push` actions.
+- A guarded `Amend last commit` action that can keep or replace the message, includes staged files, and never pushes automatically.
 - Fetch, pull, push, stash, and shortcuts to the repository in Explorer or a terminal.
 - Light, dark, and system themes; pin state; recent repositories; and restored puck position.
 - Native Git execution through Tauri and Rust, with a browser demo client for interface development.
 
-Merge, rebase, cherry-pick, destructive reset, conflict editing, remote management, and general history rewriting are intentionally outside the v0.1 scope. RepoPuck is a focused companion, not a replacement for a full Git client.
+Merge, rebase, cherry-pick, destructive reset, conflict editing, remote management, and history rewriting beyond the guarded single-commit Amend flow are intentionally outside the v0.1 scope. RepoPuck is a focused companion, not a replacement for a full Git client.
 
 ## Design direction
 
@@ -30,7 +31,9 @@ RepoPuck does **not** ask you to sign in to GitHub and does not store GitHub tok
 
 Local operations use the `git` executable installed on your system. When a remote operation needs authentication, Git delegates it to your existing setup—typically Git Credential Manager over HTTPS or your configured SSH agent and keys. If `git push` works in a terminal for the repository, RepoPuck uses the same authentication path.
 
-The app persists only non-secret preferences: theme, pin state, puck position, the selected repository, and a bounded recent-repository list.
+RepoPuck does not open an interactive credential prompt inside its compact panel. If authentication is not configured yet, complete a `git fetch` or `git push` in a terminal first, then retry the operation in RepoPuck.
+
+The app persists only non-secret preferences: theme, pin state, puck position, and a bounded recent-repository list whose first entry restores the selected repository at startup.
 
 ## Windows prerequisites
 
@@ -41,6 +44,7 @@ RepoPuck v0.1 targets Windows. To build it locally, install:
 - [Rust](https://www.rust-lang.org/tools/install) stable with the MSVC toolchain.
 - Microsoft C++ Build Tools with **Desktop development with C++** and a Windows SDK.
 - Microsoft Edge WebView2 Runtime. It is included with supported Windows versions, but it can also be installed separately.
+- The Windows **VBSCRIPT** optional feature when building the configured MSI target. It is enabled on most installations; see Tauri's [Windows prerequisites](https://v2.tauri.app/start/prerequisites/#windows) if `light.exe` fails.
 
 After installing Node.js, pnpm can be activated with Corepack:
 
@@ -83,7 +87,7 @@ Run the frontend gates from the repository root:
 ```powershell
 pnpm lint
 pnpm typecheck
-pnpm exec vitest run
+pnpm test
 pnpm build
 ```
 
@@ -115,6 +119,8 @@ pnpm tauri build
 
 Tauri prints the generated artifact paths when the command completes. Confirm those paths and test the resulting installer on Windows before distributing it; this README does not claim an installer location until release packaging has been verified.
 
+Development installers are currently unsigned. Windows may show an **Unknown publisher** or Microsoft Defender SmartScreen warning; release code signing is not configured yet, so distribute builds with a reviewed source revision and checksum.
+
 ## Architecture at a glance
 
 ```text
@@ -128,7 +134,7 @@ React + TypeScript panel/puck
           └── Tauri store (non-secret preferences only)
 ```
 
-The frontend owns rendering and transient interaction state. Rust owns Git process execution, repository validation, native window/tray behavior, and persisted settings. The frontend talks to a typed client boundary, allowing tests and browser development to substitute deterministic in-memory implementations.
+The frontend owns rendering, transient interaction state, and theme/pin/recent-repository preferences written through the Tauri Store plugin. Rust owns Git process execution, repository validation, native window/tray behavior, puck-position persistence, and startup restoration. The frontend talks to typed client boundaries, allowing tests and browser development to substitute deterministic in-memory implementations.
 
 Read [docs/architecture.md](docs/architecture.md) for the component map, command flow, persistence rules, and safety boundaries.
 
