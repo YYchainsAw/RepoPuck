@@ -522,6 +522,7 @@ describe("useGitWorkspace", () => {
   it("clears completed action feedback when the injected client changes", async () => {
     const oldClient = createTestClient();
     const newClient = createTestClient();
+    oldClient.push.mockResolvedValueOnce({ success: true, message: "Changes pushed" });
     let activeClient: GitClient = oldClient;
     const wrapper = ({ children }: PropsWithChildren) => (
       <GitProvider client={activeClient}>{children}</GitProvider>
@@ -531,6 +532,31 @@ describe("useGitWorkspace", () => {
 
     await act(async () => { await result.current.push(); });
     expect(result.current.notice).not.toBeNull();
+
+    activeClient = newClient;
+    rerender();
+    await waitFor(() => {
+      expect(result.current.notice).toBeNull();
+      expect(result.current.error).toBeNull();
+    });
+  });
+
+  it("clears a completed action error when the injected client changes", async () => {
+    const oldClient = createTestClient();
+    const newClient = createTestClient();
+    oldClient.push.mockResolvedValueOnce({
+      success: false,
+      message: "Push failed",
+    });
+    let activeClient: GitClient = oldClient;
+    const wrapper = ({ children }: PropsWithChildren) => (
+      <GitProvider client={activeClient}>{children}</GitProvider>
+    );
+    const { result, rerender } = renderHook(() => useGitWorkspace(), { wrapper });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    await act(async () => { await result.current.push(); });
+    expect(result.current.error).toBe("Push failed");
 
     activeClient = newClient;
     rerender();
