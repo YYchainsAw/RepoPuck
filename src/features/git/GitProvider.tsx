@@ -28,6 +28,18 @@ interface RefreshFlight {
   promise: Promise<void>;
 }
 
+interface MutationFlight {
+  token: symbol;
+  action: GitAction;
+  client: GitClient;
+  generation: number;
+}
+
+interface MutationOptions {
+  submittedMessage?: string;
+  refreshOnFailure?: boolean;
+}
+
 export function GitProvider({
   children,
   client: injectedClient,
@@ -46,7 +58,7 @@ export function GitProvider({
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
-  const busyRef = useRef<GitAction | null>(null);
+  const mutationRef = useRef<MutationFlight | null>(null);
   const mountedRef = useRef(false);
   const generationRef = useRef(0);
   const inFlightRef = useRef<RefreshFlight | null>(null);
@@ -117,18 +129,25 @@ export function GitProvider({
       mountedRef.current = false;
       generationRef.current += 1;
       inFlightRef.current = null;
+      mutationRef.current = null;
     };
   }, []);
 
   useEffect(() => {
     generationRef.current += 1;
     const generation = generationRef.current;
+    if (mutationRef.current) {
+      mutationRef.current = null;
+      setBusyAction(null);
+      setActionError(null);
+      setNotice(null);
+    }
     if (!visible) return;
 
     void performRefresh(client, generation);
 
     const timer = window.setInterval(() => {
-      if (!busyRef.current) void refresh();
+      if (!mutationRef.current) void refresh();
     }, 3_000);
     return () => {
       window.clearInterval(timer);
@@ -138,62 +157,98 @@ export function GitProvider({
     };
   }, [client, performRefresh, refresh, visible]);
 
-  const refreshAfterMutation = useCallback(async () => {
-    const targetClient = clientRef.current;
-    const generation = generationRef.current;
-    const existing = inFlightRef.current;
-    if (
-      existing?.client === targetClient &&
-      existing.generation === generation
-    ) {
-      await existing.promise;
-    }
-    if (
-      mountedRef.current &&
-      visibleRef.current &&
-      clientRef.current === targetClient &&
-      generationRef.current === generation
-    ) {
+  const refreshAfterMutation = useCallback(
+    async (
+      targetClient: GitClient,
+      generation: number,
+      isCurrent: () => boolean,
+    ): Promise<boolean> => {
+      const existing = inFlightRef.current;
+      if (
+        existing?.client === targetClient &&
+        existing.generation === generation
+      ) {
+        await existing.promise;
+        if (!isCurrent()) return false;
+      }
       await performRefresh(targetClient, generation);
-    }
-  }, [performRefresh]);
+      return isCurrent();
+    },
+    [performRefresh],
+  );
 
   const runMutation = useCallback(
     async (
       action: GitAction,
-      operation: () => Promise<OperationResult>,
-      clearCommitMessage = false,
-      refreshOnFailure = false,
+      operation: (targetClient: GitClient) => Promise<OperationResult>,
+      options: MutationOptions = {},
     ): Promise<boolean> => {
-      if (busyRef.current) return false;
+      if (
+        mutationRef.current ||
+        !mountedRef.current ||
+        !visibleRef.current
+      ) {
+        return false;
+      }
 
-      busyRef.current = action;
+      const targetClient = clientRef.current;
+      const generation = generationRef.current;
+      const mutation: MutationFlight = {
+        token: Symbol(action),
+        action,
+        client: targetClient,
+        generation,
+      };
+      const isCurrent = () =>
+        mountedRef.current &&
+        visibleRef.current &&
+        clientRef.current === targetClient &&
+        generationRef.current === generation &&
+        mutationRef.current?.token === mutation.token;
+
+      mutationRef.current = mutation;
       setBusyAction(action);
       setActionError(null);
       setNotice(null);
 
       try {
-        const result = await operation();
+        const result = await operation(targetClient);
+        if (!isCurrent()) return false;
+
         if (!result.success) {
           const message = result.message ?? `${action} failed`;
           setActionError(message);
-          if (refreshOnFailure) {
-            await refreshAfterMutation();
+          if (options.refreshOnFailure) {
+            if (
+              !(await refreshAfterMutation(
+                targetClient,
+                generation,
+                isCurrent,
+              ))
+            ) {
+              return false;
+            }
             setActionError(message);
           }
           return false;
         }
 
-        if (clearCommitMessage) setCommitMessage("");
+        if (options.submittedMessage !== undefined) {
+          setCommitMessage((currentDraft) =>
+            currentDraft === options.submittedMessage ? "" : currentDraft,
+          );
+        }
         setNotice(result.message ?? null);
-        await refreshAfterMutation();
-        return true;
+        return await refreshAfterMutation(targetClient, generation, isCurrent);
       } catch (reason) {
+        if (!isCurrent()) return false;
         setActionError(getErrorMessage(reason));
         return false;
       } finally {
-        busyRef.current = null;
-        setBusyAction(null);
+        if (isCurrent()) {
+          mutationRef.current = null;
+          setBusyAction(null);
+        }
       }
     },
     [refreshAfterMutation],
@@ -210,32 +265,45 @@ export function GitProvider({
       refresh,
       setCommitMessage,
       selectRepository: (path) =>
-        runMutation("selectRepository", () => client.selectRepository(path)),
+        runMutation("selectRepository", (targetClient) =>
+          targetClient.selectRepository(path),
+        ),
       setStaged: (paths, staged) =>
-        runMutation(staged ? "stage" : "unstage", () =>
-          staged ? client.stage(paths) : client.unstage(paths),
+        runMutation(staged ? "stage" : "unstage", (targetClient) =>
+          staged ? targetClient.stage(paths) : targetClient.unstage(paths),
         ),
       commit: () =>
-        runMutation("commit", () => client.commit(commitMessage), true),
-      push: () => runMutation("push", () => client.push()),
+        runMutation(
+          "commit",
+          (targetClient) => targetClient.commit(commitMessage),
+          { submittedMessage: commitMessage },
+        ),
+      push: () => runMutation("push", (targetClient) => targetClient.push()),
       commitAndPush: () =>
         runMutation(
           "commitAndPush",
-          () => client.commitAndPush(commitMessage),
-          true,
-          true,
+          (targetClient) => targetClient.commitAndPush(commitMessage),
+          { submittedMessage: commitMessage, refreshOnFailure: true },
         ),
       switchBranch: (branch) =>
-        runMutation("switchBranch", () => client.switchBranch(branch)),
+        runMutation("switchBranch", (targetClient) =>
+          targetClient.switchBranch(branch),
+        ),
       createBranch: (branch) =>
-        runMutation("createBranch", () => client.createBranch(branch)),
-      fetch: () => runMutation("fetch", () => client.fetch()),
-      pull: () => runMutation("pull", () => client.pull()),
-      stash: () => runMutation("stash", () => client.stash()),
+        runMutation("createBranch", (targetClient) =>
+          targetClient.createBranch(branch),
+        ),
+      fetch: () => runMutation("fetch", (targetClient) => targetClient.fetch()),
+      pull: () => runMutation("pull", (targetClient) => targetClient.pull()),
+      stash: () => runMutation("stash", (targetClient) => targetClient.stash()),
       openTerminal: () =>
-        runMutation("openTerminal", () => client.openTerminal()),
+        runMutation("openTerminal", (targetClient) =>
+          targetClient.openTerminal(),
+        ),
       openExplorer: () =>
-        runMutation("openExplorer", () => client.openExplorer()),
+        runMutation("openExplorer", (targetClient) =>
+          targetClient.openExplorer(),
+        ),
     }),
     [
       busyAction,

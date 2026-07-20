@@ -201,6 +201,36 @@ describe("useGitWorkspace", () => {
     expect(result.current.commitMessage).toBe("");
   });
 
+  it("preserves a newer draft typed while commit is pending", async () => {
+    const client = createTestClient();
+    let finishCommit!: (result: OperationResult) => void;
+    client.commit.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishCommit = resolve;
+        }),
+    );
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    act(() => result.current.setCommitMessage("Submitted draft"));
+    let commitPromise!: Promise<boolean>;
+    act(() => {
+      commitPromise = result.current.commit();
+    });
+    await waitFor(() => expect(result.current.busyAction).toBe("commit"));
+    act(() => result.current.setCommitMessage("New draft"));
+
+    await act(async () => {
+      finishCommit({ success: true });
+      await commitPromise;
+    });
+
+    expect(result.current.commitMessage).toBe("New draft");
+  });
+
   it("retains the message when a commit invocation rejects", async () => {
     const client = createTestClient();
     client.commit.mockRejectedValueOnce(new Error("Native bridge unavailable"));
@@ -410,7 +440,218 @@ describe("useGitWorkspace", () => {
     expect(result.current.snapshot).toEqual(newSnapshot);
   });
 
-  it("settles a pending refresh safely after unmount", async () => {
+  it("ignores a successful mutation from a replaced client and preserves its new draft", async () => {
+    const oldClient = createTestClient();
+    const newClient = createTestClient();
+    const newSnapshot = {
+      ...cloneSnapshot(initialSnapshot),
+      currentBranch: "develop",
+    };
+    newClient.getSnapshot.mockResolvedValue(newSnapshot);
+    let finishOldCommit!: (result: OperationResult) => void;
+    oldClient.commit.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOldCommit = resolve;
+        }),
+    );
+    let activeClient: GitClient = oldClient;
+    const wrapper = ({ children }: PropsWithChildren) => (
+      <GitProvider client={activeClient}>{children}</GitProvider>
+    );
+    const { result, rerender } = renderHook(() => useGitWorkspace(), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    act(() => result.current.setCommitMessage("Old draft"));
+    let oldCommitPromise!: Promise<boolean>;
+    act(() => {
+      oldCommitPromise = result.current.commit();
+    });
+    await waitFor(() => expect(result.current.busyAction).toBe("commit"));
+
+    activeClient = newClient;
+    rerender();
+    act(() => result.current.setCommitMessage("New client draft"));
+    await waitFor(() => expect(result.current.snapshot).toEqual(newSnapshot));
+
+    await act(async () => {
+      finishOldCommit({ success: true, message: "Old commit completed" });
+      await oldCommitPromise;
+    });
+
+    expect(result.current.commitMessage).toBe("New client draft");
+    expect(result.current.notice).toBeNull();
+    expect(result.current.error).toBeNull();
+    expect(result.current.snapshot).toEqual(newSnapshot);
+  });
+
+  it("ignores a rejected mutation from a replaced client", async () => {
+    const oldClient = createTestClient();
+    const newClient = createTestClient();
+    let rejectOldCommit!: (reason: Error) => void;
+    oldClient.commit.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectOldCommit = reject;
+        }),
+    );
+    let activeClient: GitClient = oldClient;
+    const wrapper = ({ children }: PropsWithChildren) => (
+      <GitProvider client={activeClient}>{children}</GitProvider>
+    );
+    const { result, rerender } = renderHook(() => useGitWorkspace(), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    act(() => result.current.setCommitMessage("Old draft"));
+    let oldCommitPromise!: Promise<boolean>;
+    act(() => {
+      oldCommitPromise = result.current.commit();
+    });
+    await waitFor(() => expect(result.current.busyAction).toBe("commit"));
+
+    activeClient = newClient;
+    rerender();
+    act(() => result.current.setCommitMessage("New client draft"));
+    await waitFor(() => expect(newClient.getSnapshot).toHaveBeenCalled());
+
+    await act(async () => {
+      rejectOldCommit(new Error("Old client failed"));
+      await oldCommitPromise;
+    });
+
+    expect(result.current.commitMessage).toBe("New client draft");
+    expect(result.current.error).toBeNull();
+    expect(result.current.notice).toBeNull();
+  });
+
+  it("does not let an old mutation release a newer action token", async () => {
+    const oldClient = createTestClient();
+    const newClient = createTestClient();
+    let finishOldCommit!: (result: OperationResult) => void;
+    let finishNewPush!: (result: OperationResult) => void;
+    oldClient.commit.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOldCommit = resolve;
+        }),
+    );
+    newClient.push.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishNewPush = resolve;
+        }),
+    );
+    let activeClient: GitClient = oldClient;
+    const wrapper = ({ children }: PropsWithChildren) => (
+      <GitProvider client={activeClient}>{children}</GitProvider>
+    );
+    const { result, rerender } = renderHook(() => useGitWorkspace(), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    act(() => result.current.setCommitMessage("Old draft"));
+    let oldCommitPromise!: Promise<boolean>;
+    act(() => {
+      oldCommitPromise = result.current.commit();
+    });
+    await waitFor(() => expect(result.current.busyAction).toBe("commit"));
+
+    activeClient = newClient;
+    rerender();
+    await waitFor(() => expect(result.current.busyAction).toBeNull());
+
+    let newPushPromise!: Promise<boolean>;
+    act(() => {
+      newPushPromise = result.current.push();
+    });
+    await waitFor(() => expect(result.current.busyAction).toBe("push"));
+
+    await act(async () => {
+      finishOldCommit({ success: true });
+      await oldCommitPromise;
+    });
+    expect(result.current.busyAction).toBe("push");
+
+    await act(async () => {
+      finishNewPush({ success: true });
+      await newPushPromise;
+    });
+    expect(result.current.busyAction).toBeNull();
+  });
+
+  it("returns false when a pending mutation settles after unmount", async () => {
+    const client = createTestClient();
+    let finishCommit!: (result: OperationResult) => void;
+    client.commit.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishCommit = resolve;
+        }),
+    );
+    const { result, unmount } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    act(() => result.current.setCommitMessage("Pending commit"));
+    let commitPromise!: Promise<boolean>;
+    act(() => {
+      commitPromise = result.current.commit();
+    });
+    await waitFor(() => expect(result.current.busyAction).toBe("commit"));
+    unmount();
+
+    let completed!: boolean;
+    await act(async () => {
+      finishCommit({ success: true });
+      completed = await commitPromise;
+    });
+    expect(completed).toBe(false);
+  });
+
+  it("forces a post-mutation snapshot after an older refresh completes", async () => {
+    const client = createTestClient();
+    const beforeMutation = cloneSnapshot(initialSnapshot);
+    const afterMutation = {
+      ...cloneSnapshot(initialSnapshot),
+      ahead: 1,
+    };
+    let finishOldRefresh!: (snapshot: RepositorySnapshot) => void;
+    client.getSnapshot
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishOldRefresh = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(afterMutation);
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(client.getSnapshot).toHaveBeenCalledTimes(1));
+
+    let pushPromise!: Promise<boolean>;
+    act(() => {
+      pushPromise = result.current.push();
+    });
+    await waitFor(() => expect(result.current.busyAction).toBe("push"));
+    expect(client.getSnapshot).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      finishOldRefresh(beforeMutation);
+      await pushPromise;
+    });
+
+    expect(client.getSnapshot).toHaveBeenCalledTimes(2);
+    expect(result.current.snapshot).toEqual(afterMutation);
+  });
+
+  it("leaves the last observable snapshot unchanged after unmount", async () => {
     const client = createTestClient();
     let finishSnapshot!: (snapshot: RepositorySnapshot) => void;
     let pendingSnapshot!: Promise<RepositorySnapshot>;
