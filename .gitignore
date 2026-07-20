@@ -1,0 +1,30 @@
+# Dependencies and frontend output
+node_modules/
+dist/
+coverage/
+
+# Tauri and Rust output
+target/
+src-tauri/target/
+
+# Local environment and editor files
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+*.swp
+*.suo
+*.user
+
+# Platform files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Superpowers execution ledger
+.superpowers/
