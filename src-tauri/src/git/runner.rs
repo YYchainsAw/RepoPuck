@@ -91,14 +91,13 @@ impl GitError {
     }
 
     fn failed(code: Option<i32>, stderr: &str) -> Self {
-        let detail = redact_url_credentials(stderr.trim());
         let code = code
             .map(|value| value.to_string())
             .unwrap_or_else(|| "terminated".to_owned());
-        if detail.is_empty() {
-            Self::safe(format!("Git exited with code {code}"))
+        if let Some(classification) = classify_error(stderr) {
+            Self::safe(format!("{classification} (exit code {code})"))
         } else {
-            Self::safe(format!("Git exited with code {code}: {detail}"))
+            Self::safe(format!("Git operation failed (exit code {code})"))
         }
     }
 }
@@ -111,20 +110,135 @@ impl fmt::Display for GitError {
 
 impl std::error::Error for GitError {}
 
-pub(crate) fn redact_url_credentials(value: &str) -> String {
-    value
-        .split_whitespace()
-        .map(|word| {
-            let Some(scheme) = word.find("://") else {
-                return word.to_owned();
-            };
-            let credentials_start = scheme + 3;
-            let Some(relative_at) = word[credentials_start..].find('@') else {
-                return word.to_owned();
-            };
-            let at = credentials_start + relative_at;
-            format!("{}[redacted]{}", &word[..credentials_start], &word[at..])
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+fn classify_error(stderr: &str) -> Option<&'static str> {
+    let message = stderr.to_ascii_lowercase();
+    if message.contains("authentication failed")
+        || message.contains("could not read username")
+        || message.contains("terminal prompts disabled")
+    {
+        Some("Git authentication failed")
+    } else if message.contains("repository not found")
+        || message.contains("does not appear to be a git repository")
+    {
+        Some("Git repository was not found")
+    } else if message.contains("non-fast-forward") || message.contains("fetch first") {
+        Some("Git push was rejected")
+    } else if message.contains("local changes") && message.contains("overwritten") {
+        Some("Local changes prevent this Git operation")
+    } else if message.contains("nothing to commit") {
+        Some("There is nothing to commit")
+    } else if message.contains("conflict") {
+        Some("Git operation has conflicts")
+    } else {
+        None
+    }
+}
+
+pub(crate) fn sanitize_remote_url(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    let unquoted = if trimmed.len() >= 2
+        && ((trimmed.starts_with('"') && trimmed.ends_with('"'))
+            || (trimmed.starts_with('\'') && trimmed.ends_with('\'')))
+    {
+        &trimmed[1..trimmed.len() - 1]
+    } else {
+        trimmed
+    };
+    if unquoted.is_empty() || unquoted.chars().any(char::is_control) {
+        return None;
+    }
+
+    if let Some(scheme_end) = unquoted.find("://") {
+        let authority_start = scheme_end + 3;
+        let authority_end = unquoted[authority_start..]
+            .find(['/', '?', '#'])
+            .map(|offset| authority_start + offset)
+            .unwrap_or(unquoted.len());
+        let authority = &unquoted[authority_start..authority_end];
+        let host = authority
+            .rsplit_once('@')
+            .map_or(authority, |(_, host)| host);
+        if host.is_empty() {
+            return None;
+        }
+        let suffix = &unquoted[authority_end..];
+        let safe_suffix_end = suffix.find(['?', '#']).unwrap_or(suffix.len());
+        return Some(format!(
+            "{}://{}{}",
+            &unquoted[..scheme_end],
+            host,
+            &suffix[..safe_suffix_end]
+        ));
+    }
+
+    let safe_end = unquoted.find(['?', '#']).unwrap_or(unquoted.len());
+    let safe_value = &unquoted[..safe_end];
+    let lower = safe_value.to_ascii_lowercase();
+    if lower.contains("authorization")
+        || lower.contains("credential")
+        || lower.contains("password=")
+        || lower.contains("token=")
+        || lower.contains("bearer ")
+    {
+        None
+    } else {
+        Some(safe_value.to_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{sanitize_remote_url, GitError};
+
+    #[test]
+    fn query_token_stderr_is_not_returned() {
+        let error = GitError::failed(
+            Some(128),
+            "fatal: unable to access https://example.com/repo.git?token=query-secret",
+        );
+
+        assert_eq!(error.message(), "Git operation failed (exit code 128)");
+    }
+
+    #[test]
+    fn quoted_url_credentials_are_not_returned() {
+        let error = GitError::failed(
+            Some(128),
+            "fatal: unable to access 'https://alice:password@example.com/repo.git?access_token=quoted-secret'",
+        );
+
+        assert_eq!(error.message(), "Git operation failed (exit code 128)");
+    }
+
+    #[test]
+    fn credential_helper_stderr_is_not_returned() {
+        let error = GitError::failed(
+            Some(1),
+            "credential-helper failed: Authorization: Bearer helper-secret; password=hidden",
+        );
+
+        assert_eq!(error.message(), "Git operation failed (exit code 1)");
+    }
+
+    #[test]
+    fn ordinary_remote_urls_are_preserved() {
+        assert_eq!(
+            sanitize_remote_url("https://github.com/openai/repopuck.git"),
+            Some("https://github.com/openai/repopuck.git".to_owned())
+        );
+        assert_eq!(
+            sanitize_remote_url("git@github.com:openai/repopuck.git"),
+            Some("git@github.com:openai/repopuck.git".to_owned())
+        );
+    }
+
+    #[test]
+    fn remote_url_user_info_and_query_values_are_removed() {
+        assert_eq!(
+            sanitize_remote_url(
+                "\"https://alice:password@example.com/openai/repopuck.git?token=query-secret\""
+            ),
+            Some("https://example.com/openai/repopuck.git".to_owned())
+        );
+    }
 }

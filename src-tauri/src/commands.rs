@@ -17,27 +17,58 @@ use crate::git::{
 
 #[derive(Default)]
 pub struct RepositoryState {
-    path: Mutex<Option<PathBuf>>,
+    service: Mutex<Option<GitService>>,
+}
+
+impl RepositoryState {
+    fn select(&self, path: PathBuf) -> Result<(), GitError> {
+        let service = GitService::open(&path)?;
+        let mut selected = self
+            .service
+            .lock()
+            .map_err(|_| GitError::safe("Repository state is unavailable"))?;
+        *selected = Some(service);
+        Ok(())
+    }
+
+    fn with_service<T>(
+        &self,
+        operation: impl FnOnce(&GitService) -> Result<T, GitError>,
+    ) -> Result<T, String> {
+        let selected = self
+            .service
+            .lock()
+            .map_err(|_| "Repository state is unavailable".to_owned())?;
+        let service = selected
+            .as_ref()
+            .ok_or_else(|| "No repository is selected".to_owned())?;
+        operation(service).map_err(error_message)
+    }
+
+    fn selected_path(&self) -> Result<PathBuf, String> {
+        let selected = self
+            .service
+            .lock()
+            .map_err(|_| "Repository state is unavailable".to_owned())?;
+        selected
+            .as_ref()
+            .map(|service| service.repository_path().to_owned())
+            .ok_or_else(|| "No repository is selected".to_owned())
+    }
 }
 
 #[tauri::command]
 pub fn select_repository(path: String, state: State<'_, RepositoryState>) -> OperationResult {
     let selected = PathBuf::from(path);
-    match GitService::open(&selected) {
-        Ok(_) => match state.path.lock() {
-            Ok(mut repository) => {
-                *repository = Some(selected);
-                OperationResult::success("Repository selected")
-            }
-            Err(_) => OperationResult::failure("Repository state is unavailable"),
-        },
+    match state.select(selected) {
+        Ok(()) => OperationResult::success("Repository selected"),
         Err(error) => failure(error),
     }
 }
 
 #[tauri::command]
 pub fn get_snapshot(state: State<'_, RepositoryState>) -> Result<RepositorySnapshot, String> {
-    service(&state)?.snapshot().map_err(error_message)
+    state.with_service(GitService::snapshot)
 }
 
 #[tauri::command]
@@ -114,7 +145,7 @@ pub fn stash(state: State<'_, RepositoryState>) -> OperationResult {
 
 #[tauri::command]
 pub fn open_terminal(state: State<'_, RepositoryState>) -> OperationResult {
-    match repository_path(&state).and_then(|path| spawn_terminal(&path)) {
+    match state.selected_path().and_then(|path| spawn_terminal(&path)) {
         Ok(()) => OperationResult::success("Terminal opened"),
         Err(message) => OperationResult::failure(message),
     }
@@ -122,7 +153,7 @@ pub fn open_terminal(state: State<'_, RepositoryState>) -> OperationResult {
 
 #[tauri::command]
 pub fn open_explorer(state: State<'_, RepositoryState>) -> OperationResult {
-    match repository_path(&state).and_then(|path| spawn_explorer(&path)) {
+    match state.selected_path().and_then(|path| spawn_explorer(&path)) {
         Ok(()) => OperationResult::success("Explorer opened"),
         Err(message) => OperationResult::failure(message),
     }
@@ -133,24 +164,10 @@ fn operate(
     operation: impl FnOnce(&GitService) -> Result<(), GitError>,
     success_message: &str,
 ) -> OperationResult {
-    match service(state).and_then(|service| operation(&service).map_err(error_message)) {
+    match state.with_service(operation) {
         Ok(()) => OperationResult::success(success_message),
         Err(message) => OperationResult::failure(message),
     }
-}
-
-fn service(state: &State<'_, RepositoryState>) -> Result<GitService, String> {
-    let path = repository_path(state)?;
-    GitService::open(&path).map_err(error_message)
-}
-
-fn repository_path(state: &State<'_, RepositoryState>) -> Result<PathBuf, String> {
-    state
-        .path
-        .lock()
-        .map_err(|_| "Repository state is unavailable".to_owned())?
-        .clone()
-        .ok_or_else(|| "No repository is selected".to_owned())
 }
 
 fn failure(error: GitError) -> OperationResult {
@@ -189,4 +206,106 @@ fn spawn_explorer(path: &Path) -> Result<(), String> {
 #[cfg(not(windows))]
 fn spawn_explorer(_path: &Path) -> Result<(), String> {
     Err("Opening Explorer is supported on Windows only".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs,
+        path::PathBuf,
+        process::Command,
+        sync::{
+            atomic::{AtomicU64, Ordering},
+            mpsc, Arc,
+        },
+        thread,
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    };
+
+    use super::RepositoryState;
+    use std::sync::TryLockError;
+
+    static NEXT_REPOSITORY: AtomicU64 = AtomicU64::new(0);
+
+    struct TestRepository(PathBuf);
+
+    impl TestRepository {
+        fn new() -> Self {
+            let unique = NEXT_REPOSITORY.fetch_add(1, Ordering::Relaxed);
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "repopuck-command-lock-test-{}-{timestamp}-{unique}",
+                std::process::id()
+            ));
+            fs::create_dir(&path).expect("create temporary repository");
+            let output = Command::new("git")
+                .current_dir(&path)
+                .args(["init", "--initial-branch=main"])
+                .output()
+                .expect("Git available on PATH");
+            assert!(output.status.success());
+            Self(path)
+        }
+    }
+
+    impl Drop for TestRepository {
+        fn drop(&mut self) {
+            if self.0.starts_with(std::env::temp_dir()) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+    }
+
+    #[test]
+    fn repository_session_serializes_complete_operations() {
+        let repository = TestRepository::new();
+        let state = Arc::new(RepositoryState::default());
+        state
+            .select(repository.0.clone())
+            .expect("select repository");
+        let (first_entered_tx, first_entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let first_state = Arc::clone(&state);
+        let first = thread::spawn(move || {
+            first_state.with_service(|_| {
+                first_entered_tx.send(()).expect("signal first entered");
+                release_rx.recv().expect("release first operation");
+                Ok(())
+            })
+        });
+        first_entered_rx.recv().expect("first operation entered");
+        assert!(matches!(
+            state.service.try_lock(),
+            Err(TryLockError::WouldBlock)
+        ));
+
+        let (second_entered_tx, second_entered_rx) = mpsc::channel();
+        let second_state = Arc::clone(&state);
+        let second = thread::spawn(move || {
+            second_state.with_service(|_| {
+                second_entered_tx.send(()).expect("signal second entered");
+                Ok(())
+            })
+        });
+
+        assert!(matches!(
+            second_entered_rx.recv_timeout(Duration::from_millis(150)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        release_tx.send(()).expect("release first operation");
+        first
+            .join()
+            .expect("first thread")
+            .expect("first operation");
+        second_entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("second operation entered after release");
+        second
+            .join()
+            .expect("second thread")
+            .expect("second operation");
+    }
 }

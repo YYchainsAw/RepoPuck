@@ -8,6 +8,12 @@ pub(crate) struct NumStat {
     pub deletions: Option<u64>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ParsedChanges {
+    pub changes: Vec<ChangeEntry>,
+    pub rename_sources: HashMap<String, String>,
+}
+
 pub(crate) fn parse_numstat(output: &[u8]) -> Result<HashMap<String, NumStat>, String> {
     let mut records = output
         .split(|byte| *byte == 0)
@@ -45,12 +51,22 @@ pub(crate) fn parse_changes(
     cached_numstat: &[u8],
     unstaged_numstat: &[u8],
 ) -> Result<Vec<ChangeEntry>, String> {
+    parse_changes_with_renames(status, cached_numstat, unstaged_numstat)
+        .map(|parsed| parsed.changes)
+}
+
+pub(crate) fn parse_changes_with_renames(
+    status: &[u8],
+    cached_numstat: &[u8],
+    unstaged_numstat: &[u8],
+) -> Result<ParsedChanges, String> {
     let cached = parse_numstat(cached_numstat)?;
     let unstaged = parse_numstat(unstaged_numstat)?;
     let mut records = status
         .split(|byte| *byte == 0)
         .filter(|record| !record.is_empty());
     let mut changes = Vec::new();
+    let mut rename_sources = HashMap::new();
 
     while let Some(record) = records.next() {
         if record.len() < 3 || record[2] != b' ' {
@@ -63,7 +79,10 @@ pub(crate) fn parse_changes(
             .to_owned();
 
         if matches!(index, 'R' | 'C') || matches!(worktree, 'R' | 'C') {
-            records.next().ok_or("Missing renamed source path")?;
+            let source = std::str::from_utf8(records.next().ok_or("Missing renamed source path")?)
+                .map_err(|_| "Git returned a non-UTF-8 path")?
+                .to_owned();
+            rename_sources.insert(path.clone(), source);
         }
 
         if index == '?' && worktree == '?' {
@@ -92,7 +111,10 @@ pub(crate) fn parse_changes(
         }
     }
 
-    Ok(changes)
+    Ok(ParsedChanges {
+        changes,
+        rename_sources,
+    })
 }
 
 fn parse_count(value: &str) -> Result<Option<u64>, String> {

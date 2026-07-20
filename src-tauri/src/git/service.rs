@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use super::{
     model::{BranchSummary, RepositoryInfo, RepositorySnapshot},
-    parser::parse_changes,
-    runner::{redact_url_credentials, GitError, GitRunner},
+    parser::{parse_changes, parse_changes_with_renames},
+    runner::{sanitize_remote_url, GitError, GitRunner},
 };
 
 #[derive(Clone, Debug)]
@@ -50,7 +50,7 @@ impl GitService {
         let remote_url = self
             .runner
             .try_run(["config", "--get", "remote.origin.url"])?
-            .map(|value| redact_url_credentials(text(&value).trim()));
+            .and_then(|value| sanitize_remote_url(text(&value).trim()));
 
         Ok(RepositorySnapshot {
             repository: RepositoryInfo {
@@ -76,11 +76,25 @@ impl GitService {
         if paths.is_empty() {
             return Ok(());
         }
+        let status =
+            self.runner
+                .run(["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
+        let parsed = parse_changes_with_renames(&status, &[], &[]).map_err(GitError::safe)?;
+        let mut expanded_paths = Vec::with_capacity(paths.len() * 2);
+        for path in paths {
+            if let Some(source) = parsed.rename_sources.get(path) {
+                expanded_paths.push(source.clone());
+            }
+            expanded_paths.push(path.clone());
+        }
         if staged {
-            self.runner.run_with_paths(&["add"], paths)?;
+            self.runner.run_with_paths(&["add"], &expanded_paths)?;
+        } else if self.has_head()? {
+            self.runner
+                .run_with_paths(&["restore", "--staged"], &expanded_paths)?;
         } else {
             self.runner
-                .run_with_paths(&["restore", "--staged"], paths)?;
+                .run_with_paths(&["rm", "--cached"], &expanded_paths)?;
         }
         Ok(())
     }
@@ -140,6 +154,10 @@ impl GitService {
         Ok(())
     }
 
+    pub fn repository_path(&self) -> &Path {
+        self.runner.repository()
+    }
+
     fn validate_branch(&self, branch: &str) -> Result<(), GitError> {
         if branch.is_empty() || branch.contains(['\r', '\n', '\0']) {
             return Err(GitError::safe("Invalid branch name"));
@@ -154,7 +172,7 @@ impl GitService {
             "--format=%(refname:short)%00%(upstream:short)",
             "refs/heads",
         ])?;
-        Ok(text(&output)
+        let mut branches = text(&output)
             .lines()
             .filter_map(|line| {
                 let (name, upstream) = line.split_once('\0')?;
@@ -164,7 +182,21 @@ impl GitService {
                     upstream: (!upstream.is_empty()).then(|| upstream.to_owned()),
                 })
             })
-            .collect())
+            .collect::<Vec<_>>();
+        if !current.is_empty() && !branches.iter().any(|branch| branch.name == current) {
+            branches.push(BranchSummary {
+                name: current.to_owned(),
+                is_current: true,
+                upstream: None,
+            });
+        }
+        Ok(branches)
+    }
+
+    fn has_head(&self) -> Result<bool, GitError> {
+        self.runner
+            .try_run(["rev-parse", "--verify", "HEAD"])
+            .map(|output| output.is_some())
     }
 
     fn ahead_behind(&self) -> Result<(u64, u64), GitError> {
@@ -234,6 +266,25 @@ mod tests {
             fs::write(repository.path.join("tracked.txt"), "initial\n").expect("write fixture");
             repository.git(&["add", "--", "tracked.txt"]);
             repository.git(&["commit", "-m", "initial"]);
+            repository
+        }
+
+        fn unborn() -> Self {
+            let unique = NEXT_REPOSITORY.fetch_add(1, Ordering::Relaxed);
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "repopuck-unborn-test-{}-{timestamp}-{unique}",
+                std::process::id()
+            ));
+            fs::create_dir(&path).expect("create temporary repository");
+
+            let repository = Self { path };
+            repository.git(&["init", "--initial-branch=main"]);
+            repository.git(&["config", "user.name", "RepoPuck Test"]);
+            repository.git(&["config", "user.email", "repopuck@example.invalid"]);
             repository
         }
 
@@ -413,5 +464,60 @@ mod tests {
         service.push().expect("push using existing upstream");
 
         let _ = fs::remove_dir_all(&remote_path);
+    }
+
+    #[test]
+    fn unstaging_a_rename_restores_both_index_paths() {
+        let repository = TestRepository::new();
+        repository.git(&["mv", "--", "tracked.txt", "renamed file.txt"]);
+        let service = GitService::open(&repository.path).expect("valid repository");
+
+        assert!(service
+            .snapshot()
+            .expect("staged snapshot")
+            .changes
+            .iter()
+            .any(|change| change.path == "renamed file.txt"
+                && change.staged
+                && change.kind.as_ref() == "renamed"));
+
+        service
+            .set_staged(&["renamed file.txt".into()], false)
+            .expect("unstage complete rename");
+
+        assert!(repository.git(&["diff", "--cached", "--quiet"]).is_empty());
+        let status = repository.git(&["status", "--porcelain=v1"]);
+        assert!(
+            status.lines().any(|line| line == " D tracked.txt"),
+            "unexpected status: {status:?}"
+        );
+        assert!(
+            status.lines().any(|line| line == "?? \"renamed file.txt\""),
+            "unexpected status: {status:?}"
+        );
+    }
+
+    #[test]
+    fn unborn_repository_can_stage_unstage_and_report_its_branch() {
+        let repository = TestRepository::unborn();
+        fs::write(repository.path.join("first file.txt"), "first\n").expect("write first file");
+        let service = GitService::open(&repository.path).expect("valid unborn repository");
+
+        service
+            .set_staged(&["first file.txt".into()], true)
+            .expect("stage first file");
+        service
+            .set_staged(&["first file.txt".into()], false)
+            .expect("unstage before first commit");
+
+        let snapshot = service.snapshot().expect("unborn snapshot");
+        assert_eq!(snapshot.current_branch, "main");
+        assert!(snapshot
+            .branches
+            .iter()
+            .any(|branch| branch.name == "main" && branch.is_current));
+        assert!(snapshot.changes.iter().any(|change| {
+            change.path == "first file.txt" && change.untracked && !change.staged
+        }));
     }
 }
