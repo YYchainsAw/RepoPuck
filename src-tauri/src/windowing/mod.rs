@@ -25,6 +25,12 @@ pub struct ShellState {
 
 pub struct PuckMenu(pub tauri::menu::Menu<Wry>);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PanelAction {
+    Show,
+    Toggle,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedPuckPosition {
@@ -64,11 +70,26 @@ pub fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
 
 #[tauri::command]
 pub fn toggle_panel(app: AppHandle) -> Result<(), String> {
-    let panel = window(&app, PANEL_LABEL)?;
+    perform_panel_action(&app, puck_click_action())
+}
+
+pub(crate) fn puck_click_action() -> PanelAction {
+    PanelAction::Toggle
+}
+
+pub(crate) fn perform_panel_action(app: &AppHandle, action: PanelAction) -> Result<(), String> {
+    match action {
+        PanelAction::Show => show_panel(app),
+        PanelAction::Toggle => toggle_panel_for(app),
+    }
+}
+
+fn toggle_panel_for(app: &AppHandle) -> Result<(), String> {
+    let panel = window(app, PANEL_LABEL)?;
     if panel.is_visible().map_err(safe_window_error)? {
         panel.hide().map_err(safe_window_error)
     } else {
-        show_panel(&app)
+        show_panel(app)
     }
 }
 
@@ -264,4 +285,20 @@ fn safe_window_error(_: tauri::Error) -> String {
 
 fn safe_store_error(_: tauri_plugin_store::Error) -> String {
     "RepoPuck could not save its settings".to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn puck_window_configuration_is_non_focusable() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../../tauri.conf.json")).expect("valid config");
+        let windows = config["app"]["windows"].as_array().expect("window array");
+        let puck = windows
+            .iter()
+            .find(|window| window["label"] == "puck")
+            .expect("puck window");
+
+        assert_eq!(puck["focusable"], false);
+    }
 }

@@ -9,6 +9,10 @@ const REFRESH: &str = "refresh";
 const SETTINGS: &str = "settings";
 const QUIT: &str = "quit";
 
+pub(crate) fn tray_left_click_action() -> super::PanelAction {
+    super::PanelAction::Show
+}
+
 pub fn setup(app: &App) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
     let open_panel = MenuItem::with_id(app, OPEN_PANEL, "Open panel", true, None::<&str>)?;
     let refresh = MenuItem::with_id(app, REFRESH, "Refresh", true, None::<&str>)?;
@@ -21,7 +25,7 @@ pub fn setup(app: &App) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             OPEN_PANEL => {
-                let _ = super::show_panel(app);
+                let _ = super::perform_panel_action(app, super::PanelAction::Show);
             }
             REFRESH => {
                 let _ = super::request_refresh(app);
@@ -41,7 +45,7 @@ pub fn setup(app: &App) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
                     ..
                 }
             ) {
-                let _ = super::toggle_panel(tray.app_handle().clone());
+                let _ = super::perform_panel_action(tray.app_handle(), tray_left_click_action());
             }
         });
     if let Some(icon) = app.default_window_icon() {
@@ -49,4 +53,19 @@ pub fn setup(app: &App) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
     }
     builder.build(app)?;
     Ok(menu)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn tray_left_click_shows_the_panel_while_the_puck_command_toggles_it() {
+        assert_eq!(
+            super::tray_left_click_action(),
+            super::super::PanelAction::Show
+        );
+        assert_eq!(
+            super::super::puck_click_action(),
+            super::super::PanelAction::Toggle
+        );
+    }
 }

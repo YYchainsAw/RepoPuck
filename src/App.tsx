@@ -1,7 +1,9 @@
+import { useEffect, useRef } from "react";
 import { GitProvider } from "./features/git/GitProvider";
 import { useGitWorkspace } from "./features/git/useGitWorkspace";
 import { PanelShell } from "./features/shell/PanelShell";
 import { Puck } from "./features/shell/Puck";
+import { createNativeShellClient } from "./features/shell/nativeClient";
 import { ShellSettingsProvider } from "./features/shell/ShellSettingsProvider";
 import {
   DEFAULT_SHELL_SETTINGS,
@@ -21,7 +23,28 @@ interface AppProps {
 
 function PuckWindow() {
   const workspace = useGitWorkspace();
-  return <Puck changeCount={workspace.snapshot?.changes.length ?? 0} />;
+  const nativeClient = useRef(createNativeShellClient()).current;
+
+  useEffect(() => {
+    let active = true;
+    let stopListening: (() => void) | undefined;
+    void nativeClient
+      .listen({
+        onRefreshRequested: () => void workspace.refresh(),
+        onOpenSettingsRequested: () => undefined,
+      })
+      .then((stop) => {
+        if (active) stopListening = stop;
+        else stop();
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+      stopListening?.();
+    };
+  }, [nativeClient, workspace.refresh]);
+
+  return <Puck changeCount={workspace.snapshot?.changes.length ?? 0} client={nativeClient} />;
 }
 
 export function App({

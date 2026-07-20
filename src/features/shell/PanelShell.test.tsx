@@ -84,6 +84,7 @@ beforeEach(() => {
   workspace.current = createWorkspace();
   shell.current = {
     settings: { theme: "light", pinned: false, recentRepositories: [] },
+    colorMode: "light",
     setTheme: vi.fn(),
     setPinned: vi.fn(),
     rememberRepository: vi.fn(),
@@ -327,6 +328,10 @@ describe("PanelShell", () => {
     expect(workspace.current.selectRepository).toHaveBeenCalledWith(
       "C:\\Projects\\recent",
     );
+    expect(
+      getComputedStyle(screen.getByRole("button", { name: "Open C:\\Projects\\recent" }))
+        .minHeight,
+    ).toBe("var(--panel-control-height)");
   });
 
   it("exposes compact responsive semantics down to 360px", () => {

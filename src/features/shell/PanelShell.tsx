@@ -10,7 +10,6 @@ import { createNativeShellClient } from "./nativeClient";
 import { Notice } from "./Notice";
 import { SettingsDialog } from "./SettingsDialog";
 import { useShellSettings } from "./ShellSettingsProvider";
-import { resolveTheme } from "./settings";
 
 const busyLabels = {
   selectRepository: "Choosing repository…",
@@ -32,7 +31,7 @@ export function PanelShell() {
   const workspace = useGitWorkspace();
   const shell = useShellSettings();
   const nativeClient = useRef(createNativeShellClient()).current;
-  const dark = resolveTheme(shell.settings.theme) === "dark";
+  const dark = shell.colorMode === "dark";
   const pinned = shell.settings.pinned;
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);

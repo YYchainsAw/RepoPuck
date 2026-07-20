@@ -63,7 +63,7 @@
   border-radius: 6px;
   color: var(--panel-text);
   font: inherit;
-  min-height: 40px;
+  min-height: 44px;
   padding: 0 10px;
 }
 
@@ -72,6 +72,7 @@
   display: grid;
   gap: 8px;
   grid-template-columns: auto auto 1fr;
+  min-height: 44px;
 }
 
 .settings-checkbox input {
@@ -85,6 +86,11 @@
   align-items: center;
   display: flex;
   justify-content: space-between;
+}
+
+.recent-repositories-heading button,
+.recent-repositories p {
+  min-height: 44px;
 }
 
 .recent-repositories h2 {
@@ -117,7 +123,7 @@
   display: grid;
   gap: 8px;
   grid-template-columns: 18px minmax(0, 1fr);
-  min-height: 40px;
+  min-height: 44px;
   padding: 6px 4px;
   text-align: left;
   width: 100%;

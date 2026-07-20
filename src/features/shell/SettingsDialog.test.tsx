@@ -86,3 +86,30 @@ it("opens and clears a bounded recent repository list", async () => {
   );
   expect(screen.getByText("No recent repositories.")).toBeInTheDocument();
 });
+
+it("keeps settings controls and recent repository rows at least 44 pixels tall", () => {
+  render(
+    <ShellSettingsProvider
+      initialSettings={{
+        theme: "system",
+        pinned: false,
+        recentRepositories: ["C:\\work\\one"],
+      }}
+    >
+      <Harness />
+    </ShellSettingsProvider>,
+  );
+
+  expect(getComputedStyle(screen.getByRole("combobox", { name: "Theme" })).minHeight).toBe(
+    "44px",
+  );
+  expect(getComputedStyle(screen.getByRole("checkbox", { name: "Keep panel on top" }).closest("label")!).minHeight).toBe(
+    "44px",
+  );
+  expect(getComputedStyle(screen.getByRole("button", { name: "Clear recent repositories" })).minHeight).toBe(
+    "44px",
+  );
+  expect(getComputedStyle(screen.getByRole("button", { name: "Open C:\\work\\one" })).minHeight).toBe(
+    "44px",
+  );
+});

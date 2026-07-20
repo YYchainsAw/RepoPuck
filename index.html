@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RepoPuck</title>
+    <script>
+      document.documentElement.dataset.windowView = new URLSearchParams(location.search).get("view") === "puck" ? "puck" : "panel";
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -14,10 +14,12 @@ import {
   type ShellSettings,
   type ShellSettingsPersistence,
   type ThemePreference,
+  resolveTheme,
 } from "./settings";
 
 export interface ShellSettingsValue {
   settings: ShellSettings;
+  colorMode: "light" | "dark";
   setTheme(theme: ThemePreference): void;
   setPinned(pinned: boolean): void;
   rememberRepository(path: string): void;
@@ -41,14 +43,24 @@ export function ShellSettingsProvider({
     [injectedPersistence],
   );
   const [settings, setSettings] = useState(initialSettings);
+  const [systemPrefersDark, setSystemPrefersDark] = useState(
+    () => window.matchMedia("(prefers-color-scheme: dark)").matches,
+  );
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const apply = () => applyThemePreference(settings.theme, media.matches);
-    apply();
-    media.addEventListener("change", apply);
-    return () => media.removeEventListener("change", apply);
-  }, [settings.theme]);
+    const update = (matches = media.matches) => setSystemPrefersDark(matches);
+    update();
+    const handleChange = (event: MediaQueryListEvent) => update(event.matches);
+    media.addEventListener("change", handleChange);
+    return () => media.removeEventListener("change", handleChange);
+  }, []);
+
+  const colorMode = resolveTheme(settings.theme, systemPrefersDark);
+
+  useEffect(() => {
+    applyThemePreference(settings.theme, systemPrefersDark);
+  }, [settings.theme, systemPrefersDark]);
 
   const update = useCallback(
     (change: (current: ShellSettings) => ShellSettings) => {
@@ -65,6 +77,7 @@ export function ShellSettingsProvider({
   const value = useMemo<ShellSettingsValue>(
     () => ({
       settings,
+      colorMode,
       setTheme: (theme) => update((current) => ({ ...current, theme })),
       setPinned: (pinned) => update((current) => ({ ...current, pinned })),
       rememberRepository: (path) => update((current) => addRecentRepository(current, path)),
@@ -75,7 +88,7 @@ export function ShellSettingsProvider({
             : { ...current, recentRepositories: [] },
         ),
     }),
-    [settings, update],
+    [colorMode, settings, update],
   );
 
   return (

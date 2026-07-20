@@ -77,7 +77,7 @@ html[data-window-view="puck"] #root {
   color: var(--panel-text);
   cursor: pointer;
   font: inherit;
-  min-height: 36px;
+  min-height: var(--panel-control-height);
   overflow: hidden;
   padding: 6px 8px;
   text-align: left;
