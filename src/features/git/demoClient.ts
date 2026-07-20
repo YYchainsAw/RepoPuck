@@ -1,4 +1,8 @@
-import type { GitClient, RepositorySnapshot } from "./types";
+import type {
+  GitClient,
+  OperationResult,
+  RepositorySnapshot,
+} from "./types";
 
 const demoSnapshot: RepositorySnapshot = {
   repository: {
@@ -33,16 +37,92 @@ const demoSnapshot: RepositorySnapshot = {
   ],
 };
 
-const successfulOperation = (): Promise<{ success: true }> =>
-  Promise.resolve({ success: true });
-
 export function createDemoGitClient(): GitClient {
+  const snapshot = structuredClone(demoSnapshot);
+
+  const success = (message: string): Promise<OperationResult> =>
+    Promise.resolve({ success: true, message });
+  const updateStaged = (paths: string[], staged: boolean) => {
+    snapshot.changes = snapshot.changes.map((change) =>
+      paths.includes(change.path) ? { ...change, staged } : change,
+    );
+    return success(staged ? "Changes staged" : "Changes unstaged");
+  };
+  const commit = async (message: string): Promise<OperationResult> => {
+    if (!message.trim()) {
+      return { success: false, message: "Enter a commit message" };
+    }
+
+    const stagedChanges = snapshot.changes.filter((change) => change.staged);
+    if (stagedChanges.length === 0) {
+      return { success: false, message: "Nothing staged to commit" };
+    }
+
+    snapshot.changes = snapshot.changes.filter((change) => !change.staged);
+    snapshot.ahead += 1;
+    return { success: true, message: "Commit created" };
+  };
+  const switchBranch = async (branch: string): Promise<OperationResult> => {
+    if (!snapshot.branches.some((candidate) => candidate.name === branch)) {
+      return { success: false, message: `Branch ${branch} does not exist` };
+    }
+    snapshot.currentBranch = branch;
+    snapshot.branches = snapshot.branches.map((candidate) => ({
+      ...candidate,
+      isCurrent: candidate.name === branch,
+    }));
+    return { success: true, message: `Switched to ${branch}` };
+  };
+
   return {
-    getSnapshot: async () => structuredClone(demoSnapshot),
-    stage: successfulOperation,
-    unstage: successfulOperation,
-    commit: successfulOperation,
-    push: successfulOperation,
-    checkout: successfulOperation,
+    selectRepository: async (path) => {
+      const segments = path.split(/[\\/]/).filter(Boolean);
+      snapshot.repository = {
+        name: segments.at(-1) ?? path,
+        path,
+      };
+      return { success: true, message: "Repository selected" };
+    },
+    getSnapshot: async () => structuredClone(snapshot),
+    stage: (paths) => updateStaged(paths, true),
+    unstage: (paths) => updateStaged(paths, false),
+    commit,
+    push: async () => {
+      snapshot.ahead = 0;
+      return { success: true, message: "Pushed to remote" };
+    },
+    commitAndPush: async (message) => {
+      const result = await commit(message);
+      if (!result.success) return result;
+      snapshot.ahead = 0;
+      return { success: true, message: "Committed and pushed" };
+    },
+    checkout: switchBranch,
+    switchBranch,
+    createBranch: async (branch) => {
+      if (snapshot.branches.some((candidate) => candidate.name === branch)) {
+        return { success: false, message: `Branch ${branch} already exists` };
+      }
+      snapshot.currentBranch = branch;
+      snapshot.branches = [
+        ...snapshot.branches.map((candidate) => ({
+          ...candidate,
+          isCurrent: false,
+        })),
+        { name: branch, isCurrent: true },
+      ];
+      return { success: true, message: `Created ${branch}` };
+    },
+    fetch: () => success("Fetched from remote"),
+    pull: async () => {
+      snapshot.behind = 0;
+      return { success: true, message: "Pulled from remote" };
+    },
+    stash: async () => {
+      snapshot.changes = [];
+      return { success: true, message: "Changes stashed" };
+    },
+    openTerminal: () => success("Opened terminal"),
+    openExplorer: () => success("Opened Explorer"),
   };
 }
