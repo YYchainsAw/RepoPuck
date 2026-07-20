@@ -104,6 +104,18 @@ pub fn commit(message: String, state: State<'_, RepositoryState>) -> OperationRe
 }
 
 #[tauri::command]
+pub fn amend_last_commit(
+    message: Option<String>,
+    state: State<'_, RepositoryState>,
+) -> OperationResult {
+    operate(
+        &state,
+        |service| service.amend_last_commit(message.as_deref()),
+        "Last commit amended",
+    )
+}
+
+#[tauri::command]
 pub fn push(state: State<'_, RepositoryState>) -> OperationResult {
     operate(&state, GitService::push, "Changes pushed")
 }

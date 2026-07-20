@@ -19,6 +19,7 @@ pub fn run() {
             commands::get_snapshot,
             commands::set_staged,
             commands::commit,
+            commands::amend_last_commit,
             commands::push,
             commands::commit_and_push,
             commands::switch_branch,

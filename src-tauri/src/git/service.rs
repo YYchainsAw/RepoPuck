@@ -108,6 +108,22 @@ impl GitService {
         Ok(())
     }
 
+    pub fn amend_last_commit(&self, message: Option<&str>) -> Result<(), GitError> {
+        if !self.has_head()? {
+            return Err(GitError::safe("Cannot amend without an existing commit"));
+        }
+        match message.filter(|message| !message.trim().is_empty()) {
+            Some(message) => {
+                self.runner
+                    .run(["commit", "--amend", "--cleanup=verbatim", "-m", message])?;
+            }
+            None => {
+                self.runner.run(["commit", "--amend", "--no-edit"])?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn push(&self) -> Result<(), GitError> {
         let upstream = self.runner.try_run([
             "rev-parse",
@@ -387,6 +403,71 @@ mod tests {
         assert!(repository
             .git(&["status", "--porcelain=v1", "--", "left-unstaged.txt"])
             .starts_with("??"));
+    }
+
+    #[test]
+    fn amend_includes_staged_content_in_the_latest_commit() {
+        let repository = TestRepository::new();
+        fs::write(repository.path.join("tracked.txt"), "amended content\n")
+            .expect("modify tracked file");
+        let service = GitService::open(&repository.path).expect("valid repository");
+        service
+            .set_staged(&["tracked.txt".into()], true)
+            .expect("stage tracked file");
+
+        service
+            .amend_last_commit(None)
+            .expect("amend staged content");
+
+        assert_eq!(
+            repository.git(&["log", "-1", "--pretty=%B"]).trim(),
+            "initial"
+        );
+        assert_eq!(
+            fs::read_to_string(repository.path.join("tracked.txt")).unwrap(),
+            "amended content\n"
+        );
+        assert_eq!(repository.git(&["rev-list", "--count", "HEAD"]), "1\n");
+        assert!(repository.git(&["diff", "--cached", "--quiet"]).is_empty());
+    }
+
+    #[test]
+    fn amend_without_a_message_preserves_the_existing_message() {
+        let repository = TestRepository::new();
+        let service = GitService::open(&repository.path).expect("valid repository");
+
+        service
+            .amend_last_commit(None)
+            .expect("amend without message");
+
+        assert_eq!(
+            repository.git(&["log", "-1", "--pretty=%B"]).trim(),
+            "initial"
+        );
+    }
+
+    #[test]
+    fn amend_with_a_message_replaces_the_existing_message() {
+        let repository = TestRepository::new();
+        let service = GitService::open(&repository.path).expect("valid repository");
+
+        service
+            .amend_last_commit(Some("Revised subject\n\nRevised body"))
+            .expect("amend with replacement message");
+
+        assert_eq!(
+            repository.git(&["log", "-1", "--pretty=%B"]).trim_end(),
+            "Revised subject\n\nRevised body"
+        );
+    }
+
+    #[test]
+    fn amend_without_a_head_fails_without_creating_a_commit() {
+        let repository = TestRepository::unborn();
+        let service = GitService::open(&repository.path).expect("valid unborn repository");
+
+        assert!(service.amend_last_commit(None).is_err());
+        assert_eq!(repository.git(&["rev-list", "--all", "--count"]), "0\n");
     }
 
     #[test]

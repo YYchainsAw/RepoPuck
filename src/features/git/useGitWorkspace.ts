@@ -6,6 +6,7 @@ export type GitAction =
   | "stage"
   | "unstage"
   | "commit"
+  | "amendLastCommit"
   | "push"
   | "commitAndPush"
   | "switchBranch"
@@ -28,6 +29,7 @@ export interface GitWorkspaceValue {
   selectRepository(path: string): Promise<boolean>;
   setStaged(paths: string[], staged: boolean): Promise<boolean>;
   commit(): Promise<boolean>;
+  amendLastCommit(): Promise<boolean>;
   push(): Promise<boolean>;
   commitAndPush(): Promise<boolean>;
   switchBranch(branch: string): Promise<boolean>;

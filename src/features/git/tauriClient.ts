@@ -16,6 +16,7 @@ export function createTauriGitClient(): GitClient {
     stage: (paths) => operation("set_staged", { paths, staged: true }),
     unstage: (paths) => operation("set_staged", { paths, staged: false }),
     commit: (message) => operation("commit", { message }),
+    amendLastCommit: (message) => operation("amend_last_commit", { message }),
     push: () => operation("push"),
     commitAndPush: (message) => operation("commit_and_push", { message }),
     checkout: switchBranch,

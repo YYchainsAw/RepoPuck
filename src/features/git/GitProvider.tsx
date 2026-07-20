@@ -139,9 +139,9 @@ export function GitProvider({
     if (mutationRef.current) {
       mutationRef.current = null;
       setBusyAction(null);
-      setActionError(null);
-      setNotice(null);
     }
+    setActionError(null);
+    setNotice(null);
     if (!visible) return;
 
     void performRefresh(client, generation);
@@ -278,6 +278,15 @@ export function GitProvider({
           (targetClient) => targetClient.commit(commitMessage),
           { submittedMessage: commitMessage },
         ),
+      amendLastCommit: () => {
+        const submittedMessage = commitMessage;
+        const message = submittedMessage.trim() ? submittedMessage : undefined;
+        return runMutation(
+          "amendLastCommit",
+          (targetClient) => targetClient.amendLastCommit(message),
+          message ? { submittedMessage } : {},
+        );
+      },
       push: () => runMutation("push", (targetClient) => targetClient.push()),
       commitAndPush: () =>
         runMutation(

@@ -57,6 +57,7 @@ function createTestClient() {
       return { success: true };
     }),
     commit: vi.fn(success),
+    amendLastCommit: vi.fn(success),
     push: vi.fn(success),
     commitAndPush: vi.fn(success),
     checkout: vi.fn(success),
@@ -156,6 +157,68 @@ describe("useGitWorkspace", () => {
 
     expect(result.current.commitMessage).toBe("Keep this message");
     expect(result.current.error).toBe("Nothing to commit");
+  });
+
+  it("amends with the submitted draft and clears only that unchanged successful draft", async () => {
+    const client = createTestClient();
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    act(() => result.current.setCommitMessage("Revised commit"));
+    await act(async () => {
+      await result.current.amendLastCommit();
+    });
+
+    expect(client.amendLastCommit).toHaveBeenCalledWith("Revised commit");
+    expect(client.push).not.toHaveBeenCalled();
+    expect(result.current.commitMessage).toBe("");
+  });
+
+  it("keeps a newer draft while an amend is pending", async () => {
+    const client = createTestClient();
+    let finishAmend!: (result: OperationResult) => void;
+    client.amendLastCommit.mockImplementationOnce(
+      () => new Promise((resolve) => { finishAmend = resolve; }),
+    );
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    act(() => result.current.setCommitMessage("Submitted amend"));
+    let amendPromise!: Promise<boolean>;
+    act(() => { amendPromise = result.current.amendLastCommit(); });
+    await waitFor(() => expect(result.current.busyAction).toBe("amendLastCommit"));
+    act(() => result.current.setCommitMessage("New draft"));
+
+    await act(async () => {
+      finishAmend({ success: true });
+      await amendPromise;
+    });
+
+    expect(result.current.commitMessage).toBe("New draft");
+  });
+
+  it("preserves the draft when amend fails", async () => {
+    const client = createTestClient();
+    client.amendLastCommit.mockResolvedValueOnce({
+      success: false,
+      message: "Could not amend the last commit",
+    });
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    act(() => result.current.setCommitMessage("Keep this draft"));
+    await act(async () => {
+      await result.current.amendLastCommit();
+    });
+
+    expect(result.current.commitMessage).toBe("Keep this draft");
+    expect(result.current.error).toBe("Could not amend the last commit");
   });
 
   it("keeps an action error through background refresh until the next action", async () => {
@@ -438,6 +501,54 @@ describe("useGitWorkspace", () => {
       await Promise.resolve();
     });
     expect(result.current.snapshot).toEqual(newSnapshot);
+  });
+
+  it("clears completed action feedback when the injected client changes", async () => {
+    const oldClient = createTestClient();
+    const newClient = createTestClient();
+    let activeClient: GitClient = oldClient;
+    const wrapper = ({ children }: PropsWithChildren) => (
+      <GitProvider client={activeClient}>{children}</GitProvider>
+    );
+    const { result, rerender } = renderHook(() => useGitWorkspace(), { wrapper });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    await act(async () => { await result.current.push(); });
+    expect(result.current.notice).not.toBeNull();
+
+    activeClient = newClient;
+    rerender();
+    await waitFor(() => {
+      expect(result.current.notice).toBeNull();
+      expect(result.current.error).toBeNull();
+    });
+  });
+
+  it("clears a pending mutation when the provider becomes hidden", async () => {
+    const client = createTestClient();
+    let finishAmend!: (result: OperationResult) => void;
+    client.amendLastCommit.mockImplementationOnce(
+      () => new Promise((resolve) => { finishAmend = resolve; }),
+    );
+    let visible = true;
+    const wrapper = ({ children }: PropsWithChildren) => (
+      <GitProvider client={client} visible={visible}>{children}</GitProvider>
+    );
+    const { result, rerender } = renderHook(() => useGitWorkspace(), { wrapper });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    let amendPromise!: Promise<boolean>;
+    act(() => { amendPromise = result.current.amendLastCommit(); });
+    await waitFor(() => expect(result.current.busyAction).toBe("amendLastCommit"));
+    visible = false;
+    rerender();
+
+    await act(async () => {
+      finishAmend({ success: true, message: "Last commit amended" });
+      expect(await amendPromise).toBe(false);
+    });
+    expect(result.current.busyAction).toBeNull();
+    expect(result.current.notice).toBeNull();
   });
 
   it("ignores a successful mutation from a replaced client and preserves its new draft", async () => {

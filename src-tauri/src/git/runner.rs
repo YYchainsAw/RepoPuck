@@ -374,4 +374,21 @@ mod tests {
 
         assert_eq!(error.message(), "Git operation failed (exit code 128)");
     }
+
+    #[test]
+    fn harmless_multiline_stderr_uses_the_generic_fallback() {
+        let error = GitError::failed(
+            Some(1),
+            "error: first harmless detail\nhelp: second harmless detail",
+        );
+
+        assert_eq!(error.message(), "Git operation failed (exit code 1)");
+    }
+
+    #[test]
+    fn unknown_stderr_uses_the_generic_fallback() {
+        let error = GitError::failed(Some(1), "error: an unclassified harmless failure");
+
+        assert_eq!(error.message(), "Git operation failed (exit code 1)");
+    }
 }

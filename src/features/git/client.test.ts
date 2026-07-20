@@ -43,6 +43,8 @@ describe("createGitClient", () => {
     await client.stage(["src/App.tsx"]);
     await client.unstage(["src/App.tsx"]);
     await client.commit("Commit only");
+    await client.amendLastCommit("Revised commit");
+    await client.amendLastCommit();
     await client.push();
     await client.commitAndPush("Ship it");
     await client.checkout("main");
@@ -60,6 +62,8 @@ describe("createGitClient", () => {
       ["set_staged", { paths: ["src/App.tsx"], staged: true }],
       ["set_staged", { paths: ["src/App.tsx"], staged: false }],
       ["commit", { message: "Commit only" }],
+      ["amend_last_commit", { message: "Revised commit" }],
+      ["amend_last_commit", { message: undefined }],
       ["push"],
       ["commit_and_push", { message: "Ship it" }],
       ["switch_branch", { branch: "main" }],

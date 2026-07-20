@@ -16,6 +16,7 @@ const busyLabels = {
   stage: "Staging…",
   unstage: "Unstaging…",
   commit: "Committing…",
+  amendLastCommit: "Amending last commit…",
   push: "Pushing…",
   commitAndPush: "Committing and pushing…",
   switchBranch: "Switching branch…",
@@ -36,6 +37,7 @@ export function PanelShell() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [createBranchOpen, setCreateBranchOpen] = useState(false);
+  const [amendOpen, setAmendOpen] = useState(false);
   const [branchName, setBranchName] = useState("");
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const busy = workspace.busyAction !== null;
@@ -145,6 +147,7 @@ export function PanelShell() {
                   triggerRef={menuButtonRef}
                   onClose={closeActionMenu}
                   onOpenSettings={() => setSettingsOpen(true)}
+                  onAmendLastCommit={() => setAmendOpen(true)}
                   actions={{
                     fetch: () => void workspace.fetch(),
                     pull: () => void workspace.pull(),
@@ -204,6 +207,42 @@ export function PanelShell() {
                 <Button type="submit" variant="primary" disabled={!branchName.trim() || busy}>
                   Create
                 </Button>
+              </form>
+            </Dialog>
+          )}
+          {amendOpen && (
+            <Dialog title="Amend last commit" onClose={() => setAmendOpen(false)}>
+              <form
+                className="create-branch-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (busy) return;
+                  void workspace.amendLastCommit();
+                  setAmendOpen(false);
+                }}
+              >
+                <p>
+                  Amending rewrites the latest local commit. RepoPuck never force-pushes.
+                </p>
+                <label htmlFor="amend-commit-message">Optional commit message</label>
+                <TextInput
+                  id="amend-commit-message"
+                  aria-label="Optional commit message"
+                  value={workspace.commitMessage}
+                  autoFocus
+                  onChange={(event) => workspace.setCommitMessage(event.target.value)}
+                  placeholder="Keep the existing commit message"
+                  block
+                />
+                <p>Staged files, if any, are included. Leave this blank to keep the existing message.</p>
+                <div className="dialog-actions">
+                  <Button type="button" onClick={() => setAmendOpen(false)} disabled={busy}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" variant="primary" disabled={busy}>
+                    Amend commit
+                  </Button>
+                </div>
               </form>
             </Dialog>
           )}

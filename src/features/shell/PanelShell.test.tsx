@@ -65,6 +65,7 @@ function createWorkspace(overrides: Partial<GitWorkspaceValue> = {}): GitWorkspa
     selectRepository: vi.fn(),
     setStaged: vi.fn(),
     commit: vi.fn(),
+    amendLastCommit: vi.fn(),
     push: vi.fn(),
     commitAndPush: vi.fn(),
     switchBranch: vi.fn(),
@@ -122,7 +123,7 @@ describe("PanelShell", () => {
     expect(workspace.current.createBranch).toHaveBeenCalledWith("feature/panel");
   });
 
-  it("runs every available overflow action and explains disabled amend", () => {
+  it("opens, cancels, and confirms the amend dialog from the overflow menu", () => {
     render(<PanelShell />);
     fireEvent.click(screen.getByRole("button", { name: "More actions" }));
 
@@ -139,10 +140,17 @@ describe("PanelShell", () => {
       fireEvent.click(screen.getByRole("button", { name: "More actions" }));
     }
 
-    const amend = screen.getByRole("menuitem", { name: /Amend last commit/ });
-    expect(amend).toBeDisabled();
-    expect(amend).toHaveAccessibleDescription("Not available in this version");
-    expect(screen.getByRole("menuitem", { name: "Settings" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Amend last commit" }));
+    expect(screen.getByRole("dialog", { name: "Amend last commit" })).toBeInTheDocument();
+    expect(screen.getByText(/rewrites the latest local commit/i)).toBeInTheDocument();
+    expect(screen.getByText(/never force-pushes/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Amend last commit" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Amend last commit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Amend commit" }));
+    expect(workspace.current.amendLastCommit).toHaveBeenCalledTimes(1);
   });
 
   it("closes open menus with Escape", () => {

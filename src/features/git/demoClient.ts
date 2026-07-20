@@ -87,6 +87,8 @@ export function createDemoGitClient(): GitClient {
     stage: (paths) => updateStaged(paths, true),
     unstage: (paths) => updateStaged(paths, false),
     commit,
+    amendLastCommit: (message) =>
+      success(message?.trim() ? "Last commit amended with a new message" : "Last commit amended"),
     push: async () => {
       snapshot.ahead = 0;
       return { success: true, message: "Pushed to remote" };

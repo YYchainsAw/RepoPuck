@@ -28,6 +28,7 @@ interface ActionMenuProps {
   triggerRef: RefObject<HTMLButtonElement | null>;
   onClose(): void;
   onOpenSettings(): void;
+  onAmendLastCommit(): void;
   actions: {
     fetch(): void;
     pull(): void;
@@ -44,6 +45,7 @@ export function ActionMenu({
   triggerRef,
   onClose,
   onOpenSettings,
+  onAmendLastCommit,
   actions,
 }: ActionMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -145,20 +147,19 @@ export function ActionMenu({
             </button>
           ))}
           <div className="action-menu-divider" />
-          <span id="amend-unavailable" className="sr-only">
-            Not available in this version
-          </span>
           <button
             className="action-menu-item"
             type="button"
             role="menuitem"
             tabIndex={-1}
-            disabled
-            aria-describedby="amend-unavailable"
+            disabled={busy}
+            onClick={() => {
+              onAmendLastCommit();
+              closeAndRestoreFocus();
+            }}
           >
             <GitCommitIcon size={16} aria-hidden="true" />
             Amend last commit
-            <small>Unavailable</small>
           </button>
           <button
             className="action-menu-item"

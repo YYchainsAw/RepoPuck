@@ -39,6 +39,7 @@ export interface GitClient {
   stage(paths: string[]): Promise<OperationResult>;
   unstage(paths: string[]): Promise<OperationResult>;
   commit(message: string): Promise<OperationResult>;
+  amendLastCommit(message?: string): Promise<OperationResult>;
   push(): Promise<OperationResult>;
   commitAndPush(message: string): Promise<OperationResult>;
   checkout(branch: string): Promise<OperationResult>;
