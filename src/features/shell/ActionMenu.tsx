@@ -8,11 +8,9 @@ import {
   TerminalIcon,
   UploadIcon,
 } from "@primer/octicons-react";
-import { Dialog } from "@primer/react";
 import {
   useEffect,
   useRef,
-  useState,
   type ComponentType,
   type KeyboardEvent,
   type RefObject,
@@ -29,6 +27,7 @@ interface ActionMenuProps {
   busy: boolean;
   triggerRef: RefObject<HTMLButtonElement | null>;
   onClose(): void;
+  onOpenSettings(): void;
   actions: {
     fetch(): void;
     pull(): void;
@@ -44,9 +43,9 @@ export function ActionMenu({
   busy,
   triggerRef,
   onClose,
+  onOpenSettings,
   actions,
 }: ActionMenuProps) {
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const items: MenuAction[] = [
@@ -99,7 +98,7 @@ export function ActionMenu({
     };
   }, [onClose, open, triggerRef]);
 
-  if (!open && !settingsOpen) return null;
+  if (!open) return null;
 
   const moveFocus = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!new Set(["ArrowDown", "ArrowUp", "Home", "End"]).has(event.key)) {
@@ -121,15 +120,13 @@ export function ActionMenu({
   };
 
   return (
-    <>
-      {open && (
-        <div
-          ref={menuRef}
-          className="action-menu"
-          role="menu"
-          aria-label="Repository actions"
-          onKeyDown={moveFocus}
-        >
+    <div
+      ref={menuRef}
+      className="action-menu"
+      role="menu"
+      aria-label="Repository actions"
+      onKeyDown={moveFocus}
+    >
           {items.map(({ label, icon: Icon, run }, index) => (
             <button
               key={label}
@@ -170,22 +167,13 @@ export function ActionMenu({
             tabIndex={-1}
             disabled={busy}
             onClick={() => {
-              setSettingsOpen(true);
-              onClose();
+              onOpenSettings();
+              closeAndRestoreFocus();
             }}
           >
             <GearIcon size={16} aria-hidden="true" />
             Settings
           </button>
-        </div>
-      )}
-      {settingsOpen && (
-        <Dialog title="Settings" onClose={() => setSettingsOpen(false)}>
-          <p className="settings-placeholder">
-            Repository preferences will be available in a future version.
-          </p>
-        </Dialog>
-      )}
-    </>
+    </div>
   );
 }

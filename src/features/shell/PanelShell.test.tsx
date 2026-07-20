@@ -1,14 +1,19 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "../../styles/tokens.css";
 import "../../styles/global.css";
 import type { GitWorkspaceValue } from "../git/useGitWorkspace";
+import type { NativeShellClient, NativeShellListeners } from "./nativeClient";
+import type { ShellSettingsValue } from "./ShellSettingsProvider";
 import { PanelShell } from "./PanelShell";
 
 const workspace = vi.hoisted(() => ({ current: {} as GitWorkspaceValue }));
 const dialog = vi.hoisted(() => ({ open: vi.fn() }));
+const shell = vi.hoisted(() => ({ current: {} as ShellSettingsValue }));
+const native = vi.hoisted(() => ({ current: {} as NativeShellClient }));
+const nativeListeners = vi.hoisted(() => ({ current: null as NativeShellListeners | null }));
 
 vi.mock("../git/useGitWorkspace", () => ({
   useGitWorkspace: () => workspace.current,
@@ -16,6 +21,14 @@ vi.mock("../git/useGitWorkspace", () => ({
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: dialog.open,
+}));
+
+vi.mock("./ShellSettingsProvider", () => ({
+  useShellSettings: () => shell.current,
+}));
+
+vi.mock("./nativeClient", () => ({
+  createNativeShellClient: () => native.current,
 }));
 
 const snapshot = {
@@ -69,6 +82,26 @@ beforeEach(() => {
   dialog.open.mockReset();
   Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
   workspace.current = createWorkspace();
+  shell.current = {
+    settings: { theme: "light", pinned: false, recentRepositories: [] },
+    setTheme: vi.fn(),
+    setPinned: vi.fn(),
+    rememberRepository: vi.fn(),
+    clearRecentRepositories: vi.fn(),
+  };
+  nativeListeners.current = null;
+  native.current = {
+    togglePanel: vi.fn().mockResolvedValue(undefined),
+    setPanelPinned: vi.fn().mockResolvedValue(undefined),
+    savePuckPosition: vi.fn().mockResolvedValue(undefined),
+    openSettings: vi.fn().mockResolvedValue(undefined),
+    showPuckMenu: vi.fn().mockResolvedValue(undefined),
+    startDragging: vi.fn().mockResolvedValue(undefined),
+    listen: vi.fn().mockImplementation(async (listeners: NativeShellListeners) => {
+      nativeListeners.current = listeners;
+      return () => undefined;
+    }),
+  };
 });
 
 describe("PanelShell", () => {
@@ -251,7 +284,7 @@ describe("PanelShell", () => {
     expect(screen.getByRole("button", { name: "Refresh repository" })).toBeDisabled();
   });
 
-  it("toggles pin and dark visual states without persistence", () => {
+  it("persists pin and dark theme choices through the shell settings", () => {
     render(<PanelShell />);
     const panel = screen.getByRole("region", { name: "RepoPuck Git panel" });
     const pin = screen.getByRole("button", { name: "Pin panel" });
@@ -259,9 +292,41 @@ describe("PanelShell", () => {
 
     fireEvent.click(pin);
     fireEvent.click(theme);
-    expect(pin).toHaveAttribute("aria-pressed", "true");
-    expect(panel).toHaveAttribute("data-color-mode", "dark");
-    expect(theme).toHaveAccessibleName("Use light theme");
+    expect(shell.current.setPinned).toHaveBeenCalledWith(true);
+    expect(shell.current.setTheme).toHaveBeenCalledWith("dark");
+    expect(native.current.setPanelPinned).toHaveBeenCalledWith(false);
+    expect(panel).toHaveAttribute("data-color-mode", "light");
+  });
+
+  it("opens real settings from the overflow and native tray event", async () => {
+    render(<PanelShell />);
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Settings" }));
+    expect(screen.getByRole("combobox", { name: "Theme" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    await waitFor(() => expect(nativeListeners.current).not.toBeNull());
+    act(() => nativeListeners.current?.onOpenSettingsRequested());
+    expect(screen.getByRole("combobox", { name: "Theme" })).toBeInTheDocument();
+    act(() => nativeListeners.current?.onRefreshRequested());
+    expect(workspace.current.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers recent repositories in the empty state", () => {
+    workspace.current = createWorkspace({ snapshot: null, selectedRepository: null });
+    shell.current = {
+      ...shell.current,
+      settings: {
+        ...shell.current.settings,
+        recentRepositories: ["C:\\Projects\\recent"],
+      },
+    };
+    render(<PanelShell />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open C:\\Projects\\recent" }));
+    expect(workspace.current.selectRepository).toHaveBeenCalledWith(
+      "C:\\Projects\\recent",
+    );
   });
 
   it("exposes compact responsive semantics down to 360px", () => {

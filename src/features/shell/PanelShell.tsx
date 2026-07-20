@@ -6,7 +6,11 @@ import { RepositoryEmptyState } from "../git/RepositoryEmptyState";
 import { useGitWorkspace } from "../git/useGitWorkspace";
 import { ActionMenu } from "./ActionMenu";
 import { Header } from "./Header";
+import { createNativeShellClient } from "./nativeClient";
 import { Notice } from "./Notice";
+import { SettingsDialog } from "./SettingsDialog";
+import { useShellSettings } from "./ShellSettingsProvider";
+import { resolveTheme } from "./settings";
 
 const busyLabels = {
   selectRepository: "Choosing repository…",
@@ -26,9 +30,12 @@ const busyLabels = {
 
 export function PanelShell() {
   const workspace = useGitWorkspace();
-  const [dark, setDark] = useState(false);
-  const [pinned, setPinned] = useState(false);
+  const shell = useShellSettings();
+  const nativeClient = useRef(createNativeShellClient()).current;
+  const dark = resolveTheme(shell.settings.theme) === "dark";
+  const pinned = shell.settings.pinned;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [createBranchOpen, setCreateBranchOpen] = useState(false);
   const [branchName, setBranchName] = useState("");
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -44,6 +51,35 @@ export function PanelShell() {
     document.addEventListener("keydown", closeMenus);
     return () => document.removeEventListener("keydown", closeMenus);
   }, []);
+
+  useEffect(() => {
+    void nativeClient.setPanelPinned(pinned).catch(() => undefined);
+  }, [nativeClient, pinned]);
+
+  useEffect(() => {
+    let active = true;
+    let stopListening: (() => void) | undefined;
+    void nativeClient
+      .listen({
+        onRefreshRequested: () => void workspace.refresh(),
+        onOpenSettingsRequested: () => setSettingsOpen(true),
+      })
+      .then((stop) => {
+        if (active) stopListening = stop;
+        else stop();
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+      stopListening?.();
+    };
+  }, [nativeClient, workspace.refresh]);
+
+  useEffect(() => {
+    if (workspace.selectedRepository) {
+      shell.rememberRepository(workspace.selectedRepository.path);
+    }
+  }, [shell, workspace.selectedRepository]);
 
   const chooseRepository = async () => {
     if (!("__TAURI_INTERNALS__" in window)) return;
@@ -100,8 +136,8 @@ export function PanelShell() {
                   onSwitchBranch={(branch) => void workspace.switchBranch(branch)}
                   onCreateBranch={() => setCreateBranchOpen(true)}
                   onRefresh={() => void workspace.refresh()}
-                  onTogglePin={() => setPinned((value) => !value)}
-                  onToggleTheme={() => setDark((value) => !value)}
+                  onTogglePin={() => shell.setPinned(!pinned)}
+                  onToggleTheme={() => shell.setTheme(dark ? "light" : "dark")}
                   onToggleMenu={() => setMenuOpen((value) => !value)}
                 />
                 <ActionMenu
@@ -109,6 +145,7 @@ export function PanelShell() {
                   busy={busy}
                   triggerRef={menuButtonRef}
                   onClose={closeActionMenu}
+                  onOpenSettings={() => setSettingsOpen(true)}
                   actions={{
                     fetch: () => void workspace.fetch(),
                     pull: () => void workspace.pull(),
@@ -139,7 +176,12 @@ export function PanelShell() {
           ) : (
             <>
               {feedback}
-              <RepositoryEmptyState busy={busy} onChoose={() => void chooseRepository()} />
+              <RepositoryEmptyState
+                busy={busy}
+                recentRepositories={shell.settings.recentRepositories}
+                onChoose={() => void chooseRepository()}
+                onOpenRecent={(path) => void workspace.selectRepository(path)}
+              />
             </>
           )}
           {createBranchOpen && (
@@ -166,6 +208,18 @@ export function PanelShell() {
               </form>
             </Dialog>
           )}
+          <SettingsDialog
+            open={settingsOpen}
+            settings={shell.settings}
+            onThemeChange={shell.setTheme}
+            onPinnedChange={shell.setPinned}
+            onClearRecent={shell.clearRecentRepositories}
+            onOpenRecent={(path) => {
+              setSettingsOpen(false);
+              void workspace.selectRepository(path);
+            }}
+            onClose={() => setSettingsOpen(false)}
+          />
         </section>
       </BaseStyles>
     </ThemeProvider>

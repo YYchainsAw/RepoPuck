@@ -17,6 +17,21 @@ body {
   place-items: center;
 }
 
+html[data-window-view="panel"] body,
+html[data-window-view="puck"] body {
+  background: transparent;
+  overflow: hidden;
+}
+
+html[data-window-view="puck"],
+html[data-window-view="puck"] body,
+html[data-window-view="puck"] #root {
+  height: 58px;
+  min-height: 58px;
+  min-width: 58px;
+  width: 58px;
+}
+
 .panel-shell {
   background: var(--panel-surface);
   border: 1px solid var(--panel-border);
@@ -38,6 +53,40 @@ body {
 .commit-composer,
 .repository-empty-state {
   flex: 0 0 auto;
+}
+
+.empty-state-recents {
+  display: grid;
+  gap: 4px;
+  margin-top: 20px;
+  max-width: 100%;
+  width: 100%;
+}
+
+.empty-state-recents > span {
+  color: var(--panel-muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.empty-state-recents button {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--panel-text);
+  cursor: pointer;
+  font: inherit;
+  min-height: 36px;
+  overflow: hidden;
+  padding: 6px 8px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty-state-recents button:hover:not(:disabled) {
+  background: var(--panel-subtle);
 }
 
 .panel-top {
@@ -403,11 +452,6 @@ body {
 
 .create-branch-form label {
   font-weight: 600;
-}
-
-.settings-placeholder {
-  margin: 0;
-  padding: 16px;
 }
 
 button:focus-visible,

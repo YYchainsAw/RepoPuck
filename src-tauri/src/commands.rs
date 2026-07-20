@@ -7,7 +7,8 @@ use std::{
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_store::StoreExt;
 
 use crate::git::{
     model::{OperationResult, RepositorySnapshot},
@@ -21,7 +22,7 @@ pub struct RepositoryState {
 }
 
 impl RepositoryState {
-    fn select(&self, path: PathBuf) -> Result<(), GitError> {
+    pub(crate) fn select(&self, path: PathBuf) -> Result<(), GitError> {
         let service = GitService::open(&path)?;
         let mut selected = self
             .service
@@ -58,10 +59,19 @@ impl RepositoryState {
 }
 
 #[tauri::command]
-pub fn select_repository(path: String, state: State<'_, RepositoryState>) -> OperationResult {
+pub fn select_repository(
+    path: String,
+    app: AppHandle,
+    state: State<'_, RepositoryState>,
+) -> OperationResult {
     let selected = PathBuf::from(path);
     match state.select(selected) {
-        Ok(()) => OperationResult::success("Repository selected"),
+        Ok(()) => {
+            if let Ok(path) = state.selected_path() {
+                persist_recent_repository(&app, &path);
+            }
+            OperationResult::success("Repository selected")
+        }
         Err(error) => failure(error),
     }
 }
@@ -176,6 +186,20 @@ fn failure(error: GitError) -> OperationResult {
 
 fn error_message(error: GitError) -> String {
     error.message().to_owned()
+}
+
+fn persist_recent_repository(app: &AppHandle, path: &Path) {
+    let Ok(store) = app.store("settings.json") else {
+        return;
+    };
+    let existing = store
+        .get("recentRepositories")
+        .and_then(|value| serde_json::from_value::<Vec<String>>(value).ok())
+        .unwrap_or_default();
+    let recent =
+        crate::windowing::settings::remember_repository(&existing, &path.to_string_lossy());
+    store.set("recentRepositories", serde_json::json!(recent));
+    let _ = store.save();
 }
 
 #[cfg(windows)]

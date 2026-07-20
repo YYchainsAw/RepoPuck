@@ -2,6 +2,12 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capabilities for RepoPuck",
-  "windows": ["main"],
-  "permissions": ["core:default", "dialog:default", "fs:default"]
+  "windows": ["panel", "puck"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "dialog:default",
+    "fs:default",
+    "store:default"
+  ]
 }

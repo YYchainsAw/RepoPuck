@@ -1,0 +1,134 @@
+.puck-surface {
+  align-items: center;
+  display: flex;
+  height: 58px;
+  justify-content: center;
+  overflow: visible;
+  width: 58px;
+}
+
+.puck-button {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  height: 58px;
+  margin: 0;
+  padding: 0;
+  position: relative;
+  width: 58px;
+}
+
+.puck-button img {
+  display: block;
+  height: 58px;
+  pointer-events: none;
+  user-select: none;
+  width: 58px;
+}
+
+.puck-badge {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #d0d7de;
+  border-radius: 999px;
+  color: #1f2328;
+  display: flex;
+  font-size: 11px;
+  font-weight: 600;
+  justify-content: center;
+  min-height: 20px;
+  min-width: 20px;
+  padding: 0 5px;
+  pointer-events: none;
+  position: absolute;
+  right: -1px;
+  top: -1px;
+}
+
+.settings-dialog-content {
+  display: grid;
+  gap: 20px;
+  padding: 16px;
+}
+
+.settings-field {
+  display: grid;
+  font-weight: 600;
+  gap: 8px;
+}
+
+.settings-field select {
+  background: var(--panel-surface);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  color: var(--panel-text);
+  font: inherit;
+  min-height: 40px;
+  padding: 0 10px;
+}
+
+.settings-checkbox {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto auto 1fr;
+}
+
+.settings-checkbox input {
+  accent-color: var(--panel-primary);
+  height: 16px;
+  margin: 0;
+  width: 16px;
+}
+
+.recent-repositories-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.recent-repositories h2 {
+  font-size: 14px;
+  margin: 0;
+}
+
+.recent-repositories p {
+  color: var(--panel-muted);
+  font-size: 13px;
+  margin: 8px 0 0;
+}
+
+.recent-repositories ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.recent-repositories li + li {
+  border-top: 1px solid var(--panel-border);
+}
+
+.recent-repositories li button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--panel-text);
+  cursor: pointer;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  min-height: 40px;
+  padding: 6px 4px;
+  text-align: left;
+  width: 100%;
+}
+
+.recent-repositories li button:hover {
+  background: var(--panel-subtle);
+}
+
+.recent-repositories li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
