@@ -1,128 +1,178 @@
-# RepoPuck
+# RepoPuck 🟢
 
-RepoPuck is a lightweight Windows Git companion for the part of the workflow that should take seconds: review changed files, stage only what belongs together, switch branches, commit, and push. It lives in the system tray and can expose a draggable desktop puck or a compact GitHub Primer-style panel.
+<p align="center">
+  <img src="src-tauri/icons/128x128.png" width="96" height="96" alt="RepoPuck icon">
+</p>
 
-> Small on screen. Fast in flow.
+<p align="center">
+  <strong>Small on screen. Fast in flow.</strong><br>
+  A lightweight Windows Git companion for the commits that should take seconds.
+</p>
 
-RepoPuck is currently a pre-release v0.1.2 project. Development happens on the `develop` branch.
+<p align="center">
+  <a href="https://github.com/YYchainsAw/RepoPuck/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/YYchainsAw/RepoPuck?display_name=tag&style=flat-square&color=1f883d"></a>
+  <a href="https://github.com/YYchainsAw/RepoPuck/actions/workflows/ci.yml"><img alt="CI status" src="https://img.shields.io/github/actions/workflow/status/YYchainsAw/RepoPuck/ci.yml?branch=develop&style=flat-square&label=CI"></a>
+  <img alt="Windows" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0969da?style=flat-square&logo=windows11&logoColor=white">
+  <img alt="Tauri" src="https://img.shields.io/badge/Tauri-2-24c8db?style=flat-square&logo=tauri&logoColor=white">
+  <img alt="React" src="https://img.shields.io/badge/React-19-149eca?style=flat-square&logo=react&logoColor=white">
+</p>
 
-## What v0.1 covers
+> 中文简介：RepoPuck 是一个常驻桌面的轻量 Git 助手，让你无需切回 IDE 就能选择文件、切换分支、提交并推送。🚀
 
-- A 58 × 58 always-on-top puck and a compact Git panel that resizes from 360 × 560 to 720 × 960.
-- Repository selection, status refresh, tracked/untracked change groups, and per-file staging.
-- Local branch switching and branch creation.
-- Separate `Commit` and `Commit & Push` actions.
-- A guarded `Amend last commit` action that can keep or replace the message, includes staged files, and never pushes automatically.
-- Fetch, pull, push, stash, and shortcuts to the repository in Explorer or a terminal.
-- Light, dark, and system themes; pin state; recent repositories; and restored puck position.
-- Native Git execution through Tauri and Rust, with a browser demo client for interface development.
+RepoPuck stays close without becoming a full Git client. Open a repository, review tracked and unversioned changes separately, stage only the files that belong together, then choose **Commit** or **Commit & Push**.
 
-Merge, rebase, cherry-pick, destructive reset, conflict editing, remote management, and history rewriting beyond the guarded single-commit Amend flow are intentionally outside the v0.1 scope. RepoPuck is a focused companion, not a replacement for a full Git client.
+## ✨ Why RepoPuck?
 
-## Design direction
+- ⚡ **Fast everyday flow** — stage, commit, push, fetch, pull, stash, and switch branches from a compact panel.
+- 🎯 **Focused by design** — common Git actions stay prominent; advanced actions live in the More menu.
+- 🖥️ **Desktop-native behavior** — tray integration, always-on-top launchers, multi-monitor placement, DPI awareness, and restored geometry.
+- 🧩 **Three ways to stay nearby** — use a draggable puck, a top island, or an auto-revealing top drawer.
+- 🌗 **GitHub-inspired UI** — Primer components and tokens in light, dark, or system theme.
+- 🔐 **No GitHub account required** — RepoPuck reuses your existing Git, Git Credential Manager, or SSH setup.
 
-The interface uses GitHub Primer tokens and components, with JetBrains-inspired separation between tracked changes and unversioned files. These captures come from the real Tauri/WebView2 application at the production 420 × 720 panel size.
+## 🧭 Three shell modes
 
-![RepoPuck verified light panel](docs/images/repopuck-panel-light.png)
+Choose a mode from **More → Settings → Launch mode**. The full Git workspace is shared across all three, so switching modes never changes your repository or staged files.
 
-![RepoPuck verified dark panel](docs/images/repopuck-panel-dark.png)
+| Mode | How it behaves | Best for |
+| --- | --- | --- |
+| 🟢 **Floating puck** | A draggable 58 × 58 desktop puck. Click once to open the panel and again to close it. The puck attaches to the best panel corner. | A visible, movable Git shortcut |
+| ⬛ **Top island** | A compact GitHub-style capsule stays centered at the top of the active display. Click it to drop the panel directly underneath. | A stable launcher that never covers the sides of the screen |
+| 📜 **Top drawer** | The launcher disappears. Move the pointer to the top-center hot zone and pause briefly; the panel rolls down and hides after the pointer leaves. | A nearly invisible workspace with maximum desktop space |
 
-The approved light-panel design reference remains the primary visual source:
+The drawer uses a native cursor hot zone instead of a transparent WebView strip, so the hidden mode does not block clicks near the top of the desktop. Keyboard and tray access remain available as a fallback.
 
-![Approved RepoPuck light-panel design reference](docs/references/floating-panel-light.png)
+## 🖼️ Interface
 
-The v0.1.2 puck follows the selected docked-node direction: a full-size teal puck, graphite rim, three-node Git mark, and a small corner notch. The comparison below shows the selected source, the packaged asset, and the live 175% Windows rendering with its change-count badge.
+The panel follows GitHub Primer while borrowing JetBrains' useful separation between tracked and unversioned files.
 
-![RepoPuck v0.1.2 icon reference, packaged asset, and live rendering](docs/qa/repopuck-v012-icon-reference-vs-actual.png)
+| Light | Dark |
+| --- | --- |
+| ![RepoPuck light panel](docs/images/repopuck-panel-light.png) | ![RepoPuck dark panel](docs/images/repopuck-panel-dark.png) |
 
-The full comparison history and responsive/state evidence are recorded in [design-qa.md](design-qa.md).
+The v0.1.2 icon direction combines the RepoPuck name with a docked three-node Git mark:
 
-## Responsiveness model
+![RepoPuck icon reference, packaged asset, and live Windows rendering](docs/qa/repopuck-v012-icon-reference-vs-actual.png)
 
-RepoPuck v0.1.2 keeps native windows responsive even when Git is slow. Blocking Git work runs on Tauri's background blocking pool instead of the WebView command thread, so opening and interacting with the panel does not wait for a repository scan to finish.
+Visual comparisons, responsive evidence, and interaction-state checks live in [design-qa.md](design-qa.md).
 
-Startup restoration uses the same background path: the puck and tray can appear while the most recent repository is being validated, and the UI receives one refresh request when restoration succeeds.
+## ✅ Git workflow
 
-The puck and panel have deliberately different refresh paths:
+- 📂 Select a local repository or reopen one from the recent list.
+- 👀 Review **Changes** and **Unversioned files** as separate groups.
+- ☑️ Stage or unstage individual files and groups.
+- 🌿 Switch branches or create a new local branch.
+- 💬 Write a commit message with a focused 72-character guide.
+- ✅ Commit locally without pushing.
+- 🚀 Commit and push with a separate primary action.
+- ✏️ Amend the most recent local commit without automatic force-push.
+- 🔄 Fetch, pull, push, stash, and refresh.
+- 🗂️ Open the repository in Explorer or a terminal.
 
-- The always-visible puck asks only for a lightweight changed-file count when it starts and every 30 seconds.
-- The panel requests the full repository snapshot when it becomes visible and every 10 seconds while visible.
-- Hiding the panel stops its full-snapshot timer; reopening it immediately refreshes the data.
-- Equivalent snapshots preserve their React identity, avoiding needless rerenders when the repository has not changed.
+Merge, rebase, cherry-pick, destructive reset, conflict editing, remote management, and force-push remain intentionally outside the focused workflow.
 
-Puck activation toggles the panel: one click opens it and the next click closes it. Toggle requests are serialized so a fast second click is not lost, while native commands never race. Pointer movement becomes a window drag only after an 8 px threshold, so a failed or tiny drag cannot suppress the next click.
+## 📦 Install the stable release
 
-Before opening, native geometry evaluates all four puck corners and chooses the largest quadrant that can fully contain the current panel size. The puck overlaps the selected panel corner by 10 physical pixels, the panel stays inside the monitor work area, and a short corner-origin animation makes the relationship visible. The panel no longer closes on focus loss, so all eight edges/corners can be dragged safely. Its logical size and the docked puck position are restored across launches.
+1. Download the MSI from the [latest GitHub Release](https://github.com/YYchainsAw/RepoPuck/releases/latest).
+2. Run the installer.
+3. Open RepoPuck from the Start menu or tray.
+4. Choose a repository and make sure `git fetch` or `git push` already works in your terminal.
 
-## GitHub login and authentication
+> [!IMPORTANT]
+> Development installers are currently unsigned. Windows may show **Unknown publisher** or a Microsoft Defender SmartScreen warning. Verify the checksum shown in the Release notes before installing.
+
+RepoPuck targets Windows 10 and Windows 11 and requires:
+
+- [Git for Windows](https://gitforwindows.org/) on `PATH`.
+- Microsoft Edge WebView2 Runtime, included with supported Windows versions.
+- Existing HTTPS credentials through Git Credential Manager, or an SSH agent/key, for remote operations.
+
+## 🛠️ Technology stack
+
+| Layer | Technology | Role |
+| --- | --- | --- |
+| Desktop shell | **Tauri 2** | Native windows, system tray, IPC, packaging, and application lifecycle |
+| Native core | **Rust 2021** | Git orchestration, input validation, window geometry, persistence, and process safety |
+| UI | **React 19 + TypeScript 5.8** | Panel, launchers, settings, transitions, and typed client boundaries |
+| Design system | **GitHub Primer React + Octicons** | Accessible controls, icons, themes, and GitHub-style visual language |
+| Build tooling | **Vite 6 + pnpm 10** | Fast development, locked dependencies, and production frontend builds |
+| Testing | **Vitest + Testing Library + Rust tests** | UI behavior, parser, Git service, geometry, and state-machine coverage |
+| Git engine | **System Git CLI** | Repository status and local/remote Git operations |
+| Windows runtime | **WebView2 + Windows APIs** | Hardware-accelerated rendering, job objects, no-console processes, and cursor hot zones |
+| Automation | **GitHub Actions** | Frontend checks, Rust checks, and verified Windows MSI builds |
+
+## 🏗️ Architecture
+
+```mermaid
+flowchart TD
+    L["Launcher WebView<br>Puck / Island"] -->|toggle & mode events| W["Rust window state"]
+    H["Native top hot zone<br>Drawer mode"] --> W
+    W --> P["Shared panel WebView<br>React + Primer"]
+    P --> C["Typed Tauri commands"]
+    C --> G["Rust Git service"]
+    G --> CLI["System Git CLI"]
+    CLI --> A["GCM or SSH"]
+    W --> S["Tauri Store<br>non-secret preferences"]
+```
+
+Two WebViews are reused across all modes:
+
+- The lightweight launcher WebView renders the puck or top island. It is hidden in drawer mode.
+- The panel WebView renders the only full Git workspace and changes only its placement and transition.
+
+Blocking Git work runs outside the WebView command thread. Commands disable terminal prompting, hide console windows, bound captured output, and place each process tree in a Windows Job Object so timeouts stop helper and transport processes as well.
+
+Read [docs/architecture.md](docs/architecture.md) for the detailed component map and safety boundaries.
+
+## 🔐 Authentication and privacy
 
 RepoPuck does **not** ask you to sign in to GitHub and does not store GitHub tokens, passwords, SSH keys, or Git credentials.
 
-Local operations use the `git` executable installed on your system. When a remote operation needs authentication, Git delegates it to your existing setup—typically Git Credential Manager over HTTPS or your configured SSH agent and keys. RepoPuck disables terminal prompting, launches Git without a console window, bounds command output, and places each operation in a Windows Job Object before execution so a timeout stops the complete helper/transport process tree. It also explicitly targets the branch's configured tracking remote/ref instead of relying on ambient push defaults. If `git push` works in a terminal for the repository, RepoPuck uses the same credential path.
+Remote commands delegate authentication to your existing Git configuration:
 
-RepoPuck does not open an interactive credential prompt inside its compact panel. If authentication is not configured yet, complete a `git fetch` or `git push` in a terminal first, then retry the operation in RepoPuck.
+- 🔑 HTTPS through Git Credential Manager.
+- 🗝️ SSH through your configured agent and keys.
 
-The app persists only non-secret preferences: theme, pin state, puck position, panel size, and a bounded recent-repository list whose first entry restores the selected repository at startup.
+If `git push` works in a terminal for the selected repository, RepoPuck uses the same credential path. If it does not, complete authentication once in a terminal and retry.
 
-## Windows prerequisites
+Only non-secret preferences are persisted: theme, pin state, shell mode, panel size, launcher geometry, selected display, and a bounded recent-repository list.
 
-RepoPuck v0.1 targets Windows. To build it locally, install:
+## 👩‍💻 Development
 
-- [Git for Windows](https://gitforwindows.org/) and make sure `git` is on `PATH`.
-- [Node.js](https://nodejs.org/) 22 and pnpm 10.18.3 (the versions used by CI).
-- [Rust](https://www.rust-lang.org/tools/install) 1.97.1 with the MSVC toolchain (the version used by CI).
-- Microsoft C++ Build Tools with **Desktop development with C++** and a Windows SDK.
-- Microsoft Edge WebView2 Runtime. It is included with supported Windows versions, but it can also be installed separately.
-- The Windows **VBSCRIPT** optional feature when building the configured MSI target. It is enabled on most installations; see Tauri's [Windows prerequisites](https://v2.tauri.app/start/prerequisites/#windows) if `light.exe` fails.
+### Prerequisites
 
-After installing Node.js, pnpm can be activated with Corepack:
+- Node.js 22
+- pnpm 10.18.3
+- Rust 1.97.1 with the MSVC toolchain
+- Microsoft C++ Build Tools with **Desktop development with C++** and a Windows SDK
+- Git for Windows
+- WebView2 Runtime
+- Windows **VBSCRIPT** optional feature for MSI packaging
 
-```powershell
-corepack enable
-corepack prepare pnpm@10.18.3 --activate
-```
-
-See the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) if a native build reports a missing Windows component.
-
-## Development
-
-Clone the repository, check out `develop`, and install the locked dependencies:
+### Clone and run
 
 ```powershell
 git clone https://github.com/YYchainsAw/RepoPuck.git
 Set-Location RepoPuck
 git checkout develop
 pnpm install --frozen-lockfile
-```
-
-Run the native Tauri application:
-
-```powershell
 pnpm tauri dev
 ```
 
-For faster interface work without native commands, run the browser demo client:
+For UI work with deterministic demo data and no real repository writes:
 
 ```powershell
 pnpm dev
 ```
 
-Vite prints the local preview URL. Browser mode uses in-memory demo data and does not modify a real repository.
-
-## Quality checks
-
-Run the frontend gates from the repository root:
+### Quality gates
 
 ```powershell
 pnpm lint
 pnpm typecheck
 pnpm test
 pnpm build
-```
 
-Run the Rust gates from `src-tauri`:
-
-```powershell
 Push-Location src-tauri
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
@@ -130,49 +180,35 @@ cargo test --locked
 Pop-Location
 ```
 
-The same checks run in Windows CI. Tests that exercise Git create temporary repositories and configure identities locally; they do not use your repositories or credentials.
+GitHub Actions runs the same frontend and Rust checks and produces a verified Windows MSI artifact.
 
-## Native builds
-
-Create a debug package while developing:
+### Package a release build
 
 ```powershell
-pnpm tauri build --debug
+pnpm tauri build --bundles msi
 ```
 
-Create a release package only after the full test and visual-QA gates have passed:
+Do not distribute a local installer until automated checks, visual QA, runtime smoke tests, and checksum verification have passed.
 
-```powershell
-pnpm tauri build
-```
+## 🗺️ Roadmap
 
-Tauri prints the generated artifact paths when the command completes. Confirm those paths and test the resulting installer on Windows before distributing it; this README does not claim an installer location until release packaging has been verified.
+- [x] 🟢 Floating puck with four-corner docking
+- [x] 📐 Resizable panel with restored geometry
+- [x] 🌗 Light, dark, and system themes
+- [x] 📦 Signed-off CI pipeline and GitHub Release workflow
+- [x] ⬛ Top island mode
+- [x] 📜 Auto-revealing top drawer mode
+- [ ] 🔏 Windows code signing
+- [ ] ⌨️ Configurable global keyboard shortcut
+- [ ] 🔔 Optional push/fetch notifications
+- [ ] 🌍 Additional interface languages
 
-CI also performs a release MSI build on `windows-2022` using the locked pnpm dependencies. It verifies that a single non-empty MSI was created and uploads that installer as a workflow artifact for seven days. This is validation only: the workflow does not publish a GitHub Release or distribute the installer.
+## 🤝 Contributing
 
-Development installers are currently unsigned. Windows may show an **Unknown publisher** or Microsoft Defender SmartScreen warning; release code signing is not configured yet, so distribute builds with a reviewed source revision and checksum.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before making changes. RepoPuck uses small, coherent commits based on `develop`; commits are intentionally more frequent than pushes.
 
-## Architecture at a glance
+Bug reports and focused feature ideas are welcome in [GitHub Issues](https://github.com/YYchainsAw/RepoPuck/issues). Please include your Windows version, display scaling, shell mode, and reproduction steps for window-placement bugs.
 
-```text
-React + TypeScript panel/puck
-          │ typed GitClient / native shell client
-          ▼
-      Tauri invoke/events
-          │
-          ├── Rust Git service ──> system git ──> GCM or SSH for remotes
-          ├── native windows and tray
-          └── Tauri store (non-secret preferences only)
-```
-
-The frontend owns rendering, transient interaction state, and theme/pin/recent-repository preferences written through the Tauri Store plugin. Rust owns bounded/non-interactive Git process execution, exact literal-path staging validation, explicit remote targeting, repository validation, native window/tray behavior, puck-position persistence, and startup restoration. The webviews run with a restrictive content-security policy and no filesystem-plugin capability. The frontend talks to typed client boundaries, allowing tests and browser development to substitute deterministic in-memory implementations.
-
-Read [docs/architecture.md](docs/architecture.md) for the component map, command flow, persistence rules, and safety boundaries.
-
-## Contributing
-
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) before making changes. RepoPuck uses small, coherent commits on branches based on `develop`; pushes are intentionally less frequent than commits.
-
-## License
+## 📄 License
 
 No license has been selected yet. Until one is added, all rights are reserved by the repository owner.
