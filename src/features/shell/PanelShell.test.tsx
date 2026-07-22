@@ -94,7 +94,7 @@ beforeEach(() => {
   };
   nativeListeners.current = null;
   native.current = {
-    showPanel: vi.fn().mockResolvedValue(undefined),
+    togglePanel: vi.fn().mockResolvedValue(undefined),
     setPanelPinned: vi.fn().mockResolvedValue(undefined),
     savePuckPosition: vi.fn().mockResolvedValue(undefined),
     openSettings: vi.fn().mockResolvedValue(undefined),
