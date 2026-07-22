@@ -48,7 +48,7 @@ The native code lives under `src-tauri/src/`.
 | Area | Responsibility |
 | --- | --- |
 | `commands.rs` | Tauri command boundary, shared repository state, and conversion to serializable responses. |
-| `git/runner.rs` | Direct `std::process::Command` execution of the system `git` binary. |
+| `git/runner.rs` | Bounded, non-interactive `std::process::Command` execution of the system `git` binary. |
 | `git/parser.rs` | Pure parsing for porcelain status and numstat data. |
 | `git/service.rs` | Repository validation, staging, committing, pushing, branches, and safe secondary operations. |
 | `git/model.rs` | Rust-side models matching the TypeScript wire format. |
@@ -92,9 +92,9 @@ The submitted message is cleared only after a successful commit or Amend, and on
 
 ## Git execution and safety boundary
 
-RepoPuck launches `git` directly with `std::process::Command` and a vector of arguments. It never constructs a shell command string. Commands that accept repository paths place `--` before user-controlled paths to prevent option injection.
+RepoPuck launches `git` directly with `std::process::Command` and a vector of arguments. It never constructs a shell command string. Git stdin is closed, terminal prompting is disabled, stdout/stderr are drained concurrently with a retained-output limit, and a command that exceeds the operation timeout is stopped. Commands that accept repository paths place `--` before paths and use literal pathspecs; the service also rejects any staging path that is not present in the current porcelain snapshot.
 
-Selected directories are validated with Git and canonicalized before becoming repository state. Machine-readable output is preferred (`--porcelain` and NUL-delimited records where applicable). Errors are converted into conservative, user-safe diagnostics; credential-bearing URLs, secrets, environment values, and unrelated process data must not cross into UI notices.
+Selected directories are validated with Git and canonicalized before becoming repository state. Machine-readable output is preferred (`--porcelain` and NUL-delimited records where applicable). Push, fetch, and pull receive an explicit validated tracking remote/ref (or `origin` for first push) instead of inheriting ambient `push.default` or `remote.pushDefault` behavior. Errors are converted into conservative, user-safe diagnostics; credential-bearing URLs, secrets, environment values, and unrelated process data must not cross into UI notices.
 
 The v0.1 command surface covers repository selection/status, staging, committing, guarded single-commit Amend, pushing with upstream setup, local branch switching/creation, fetch, pull, stash, and opening the repository in Explorer or a terminal. Amend requires confirmation and never triggers an automatic or forced push. Merge, rebase, cherry-pick, destructive reset, conflict editing, remote management, and broader history rewriting do not cross this boundary in v0.1.
 
@@ -102,16 +102,18 @@ The v0.1 command surface covers repository selection/status, staging, committing
 
 RepoPuck has no GitHub sign-in flow. When Git contacts a remote, the system `git` process uses the same configured credential helper or SSH setup it uses in a terminal. RepoPuck does not receive or persist GitHub tokens, passwords, SSH private keys, or credential-helper payloads.
 
-This model intentionally supports GitHub, GitLab, self-hosted servers, and other Git remotes without adding provider-specific credential code. The compact app does not host an interactive credential prompt. A remote operation can still fail if terminal Git cannot authenticate; RepoPuck reports a sanitized error and leaves credential setup or repair to system Git tooling.
+This model intentionally supports GitHub, GitLab, self-hosted servers, and other Git remotes without adding provider-specific credential code. The compact app does not host a terminal credential prompt. A remote operation can still fail if the existing helper or SSH setup cannot authenticate non-interactively; RepoPuck reports a sanitized error and leaves credential setup or repair to system Git tooling.
 
 ## Native surfaces and lifecycle
 
 RepoPuck has two native surfaces:
 
-- The **puck** is a 58 × 58 transparent, undecorated, always-on-top launcher that stays out of the taskbar and displays the current change count.
+- The **puck** is a 58 × 58 transparent, undecorated, always-on-top launcher that stays out of the taskbar and displays the current change count. It is keyboard-focusable without taking initial focus, and Enter/Space open the panel.
 - The **panel** defaults to 420 × 720 and remains usable at 360 × 560. It opens beside the puck when space permits and is clamped to the active monitor work area.
 
 The tray owns application lifetime. Closing a surface hides it; it does not terminate the process. Explicit `Quit` from the tray menu exits. A pinned panel stays on top, while an unpinned panel can hide after losing focus.
+
+Both webviews use a restrictive production content-security policy. Their Tauri capability set is limited to the core/window commands needed by the shell, repository selection, and the non-secret settings store; RepoPuck does not register or expose the filesystem plugin to frontend code.
 
 Positioning is expressed as pure geometry first and then applied through Tauri window APIs. Tests cover each monitor edge so the panel cannot open outside the available work area.
 
@@ -134,7 +136,7 @@ These values are local convenience settings, not credentials. The store must nev
 - **Manual browser-demo smoke checks** can exercise the in-memory client without touching a repository.
 - **Native smoke tests and visual QA** are release gates for windows, tray behavior, monitor placement, light/dark states, and comparison with the approved design references.
 
-Windows CI runs the deterministic frontend and Rust gates. Native packaging and visual QA remain explicit release gates because they require inspection of the produced Windows application, not just a successful unit-test job.
+Windows CI runs the deterministic frontend and Rust gates, then performs a locked release MSI build, verifies that exactly one non-empty installer was produced, and uploads it as a short-lived workflow artifact. Native interaction smoke tests and visual QA remain explicit release gates because they require inspection of the produced Windows application, not just a successful build job.
 
 ## Adding a Git operation
 

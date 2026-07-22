@@ -21,15 +21,23 @@ Merge, rebase, cherry-pick, destructive reset, conflict editing, remote manageme
 
 ## Design direction
 
-The interface uses GitHub Primer tokens and components. The approved light-panel design reference is shown below; verified implementation captures are added only after the release visual-QA gate passes.
+The interface uses GitHub Primer tokens and components, with JetBrains-inspired separation between tracked changes and unversioned files. These captures come from the real Tauri/WebView2 application at the production 420 × 720 panel size.
+
+![RepoPuck verified light panel](docs/images/repopuck-panel-light.png)
+
+![RepoPuck verified dark panel](docs/images/repopuck-panel-dark.png)
+
+The approved light-panel design reference remains the primary visual source:
 
 ![Approved RepoPuck light-panel design reference](docs/references/floating-panel-light.png)
+
+The full comparison history and responsive/state evidence are recorded in [design-qa.md](design-qa.md).
 
 ## GitHub login and authentication
 
 RepoPuck does **not** ask you to sign in to GitHub and does not store GitHub tokens, passwords, SSH keys, or Git credentials.
 
-Local operations use the `git` executable installed on your system. When a remote operation needs authentication, Git delegates it to your existing setup—typically Git Credential Manager over HTTPS or your configured SSH agent and keys. If `git push` works in a terminal for the repository, RepoPuck uses the same authentication path.
+Local operations use the `git` executable installed on your system. When a remote operation needs authentication, Git delegates it to your existing setup—typically Git Credential Manager over HTTPS or your configured SSH agent and keys. RepoPuck disables terminal prompting inside its process, bounds command output, stops commands that exceed the operation timeout, and explicitly targets the branch's configured tracking remote/ref instead of relying on ambient push defaults. If `git push` works in a terminal for the repository, RepoPuck uses the same credential path.
 
 RepoPuck does not open an interactive credential prompt inside its compact panel. If authentication is not configured yet, complete a `git fetch` or `git push` in a terminal first, then retry the operation in RepoPuck.
 
@@ -136,7 +144,7 @@ React + TypeScript panel/puck
           └── Tauri store (non-secret preferences only)
 ```
 
-The frontend owns rendering, transient interaction state, and theme/pin/recent-repository preferences written through the Tauri Store plugin. Rust owns Git process execution, repository validation, native window/tray behavior, puck-position persistence, and startup restoration. The frontend talks to typed client boundaries, allowing tests and browser development to substitute deterministic in-memory implementations.
+The frontend owns rendering, transient interaction state, and theme/pin/recent-repository preferences written through the Tauri Store plugin. Rust owns bounded/non-interactive Git process execution, exact literal-path staging validation, explicit remote targeting, repository validation, native window/tray behavior, puck-position persistence, and startup restoration. The webviews run with a restrictive content-security policy and no filesystem-plugin capability. The frontend talks to typed client boundaries, allowing tests and browser development to substitute deterministic in-memory implementations.
 
 Read [docs/architecture.md](docs/architecture.md) for the component map, command flow, persistence rules, and safety boundaries.
 
