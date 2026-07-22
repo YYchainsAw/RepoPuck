@@ -39,7 +39,7 @@ The frontend lives under `src/` and owns presentation plus short-lived interacti
 | `src/features/git/tauriClient.ts` | Typed translation between `GitClient` calls and Tauri commands. |
 | `src/features/git/GitProvider.tsx` and `useGitWorkspace.ts` | Snapshot refresh, polling, message state, mutation serialization, and notices/errors. |
 | `src/features/git/` components | Change groups, rows, empty state, and commit composition. |
-| `src/features/shell/PanelWindow.tsx` | Native panel visibility observation, visible-only workspace lifecycle, and lazy panel loading. |
+| `src/features/shell/PanelWindow.tsx` | Native panel visibility observation, corner-origin opening motion, visible-only workspace lifecycle, resize handles, and lazy panel loading. |
 | `src/features/shell/PuckWindow.tsx` and `puckChangeCount.ts` | Lightweight puck lifecycle and single-flight changed-file count refresh. |
 | `src/features/shell/` | Panel layout, puck gestures, header, overflow actions, settings, theme, and native-shell interaction. |
 
@@ -119,13 +119,13 @@ This model intentionally supports GitHub, GitLab, self-hosted servers, and other
 RepoPuck has two native surfaces:
 
 - The **puck** is a 58 × 58 transparent, undecorated, always-on-top launcher that stays out of the taskbar and displays the current change count. It is keyboard-focusable without taking initial focus, and Enter/Space open the panel.
-- The **panel** defaults to 420 × 720 and remains usable at 360 × 560. It opens beside the puck when space permits and is clamped to the active monitor work area.
+- The **panel** defaults to 420 × 720, remains usable at 360 × 560, and is bounded at 720 × 960. Before every open, all four puck-relative quadrants are evaluated; the largest quadrant that can contain the current panel is selected, then a second measurement pass keeps the actual native outer frame inside the target monitor's work area across DPI changes. The puck overlaps the selected panel corner by 10 physical pixels and the `panel_opened` event gives the frontend the matching transform origin.
 
-The tray owns application lifetime. Closing a surface hides it; it does not terminate the process. Explicit `Quit` from the tray menu exits. A pinned panel stays on top, while an unpinned panel can hide after losing focus.
+The tray owns application lifetime. Closing a surface hides it; it does not terminate the process. Explicit `Quit` from the tray menu exits after the current panel and puck geometry is saved. A pinned panel stays on top; an unpinned panel remains open on focus loss so native edge resizing is not interrupted. A second puck activation hides the panel, while tray and settings activation remain idempotent show operations.
 
-Both webviews use a restrictive production content-security policy. Capabilities are split per window: both can listen for shell events and access the non-secret settings store, only the panel can open the repository picker and read its own native visibility, and only the puck can initiate native dragging. RepoPuck does not register or expose the filesystem plugin to frontend code.
+Both webviews use a restrictive production content-security policy. Capabilities are split per window: both can listen for shell events and access the non-secret settings store, only the panel can open the repository picker, read its own native visibility, and initiate native resize dragging, and only the puck can initiate native window dragging. RepoPuck does not register or expose the filesystem plugin to frontend code.
 
-Positioning is expressed as pure geometry first and then applied through Tauri window APIs. Tests cover each monitor edge so the panel cannot open outside the available work area.
+Positioning is expressed as pure geometry first and then applied through Tauri window APIs. Panel size persistence uses logical inner dimensions; placement uses the measured physical outer frame. Resize and scale-factor events reattach the puck to the chosen corner, with unchanged native positions skipped to reduce work during an active drag. Tests cover every dock corner, negative monitor coordinates, clamping, supported size bounds, and non-zero native frame insets.
 
 ## Persistence
 
@@ -134,6 +134,7 @@ The Tauri store contains only:
 - Theme preference (`system`, `light`, or `dark`).
 - Panel pin state.
 - Monitor-relative puck position.
+- Logical panel size, clamped to the supported minimum and maximum.
 - A bounded list of recent repository paths; the first entry is restored as the selected repository at startup.
 
 These values are local convenience settings, not credentials. The store must never contain remote passwords, access tokens, SSH keys, Git credential material, commit content, or repository file content.
