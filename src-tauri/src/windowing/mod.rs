@@ -352,11 +352,23 @@ fn reposition_puck_for_panel(app: &AppHandle) -> Result<(), String> {
     if !panel.is_visible().map_err(safe_window_error)? {
         return Ok(());
     }
-    let panel_position = panel.outer_position().map_err(safe_window_error)?;
+    let mut panel_position = panel.outer_position().map_err(safe_window_error)?;
     let panel_size = panel.outer_size().map_err(safe_window_error)?;
     let puck_size = puck_content_size(&puck)?;
     let monitor = current_monitor(&panel, app)?;
     let work_area = monitor_rect(&monitor);
+    let clamped_panel_position = clamp_window_position(
+        Rect::new(
+            panel_position.x,
+            panel_position.y,
+            panel_size.width,
+            panel_size.height,
+        ),
+        work_area,
+    );
+    if set_window_position_if_changed(&panel, clamped_panel_position)? {
+        panel_position = PhysicalPosition::new(clamped_panel_position.x, clamped_panel_position.y);
+    }
     let position = puck_position(
         Rect::new(
             panel_position.x,
