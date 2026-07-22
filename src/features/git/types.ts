@@ -24,6 +24,7 @@ export interface RepositorySnapshot {
   repository: {
     name: string;
     path: string;
+    remoteName?: string;
     remoteUrl?: string;
   };
   currentBranch: string;

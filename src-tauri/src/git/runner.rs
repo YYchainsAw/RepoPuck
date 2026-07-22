@@ -1,9 +1,15 @@
 use std::{
     ffi::OsStr,
     fmt,
+    io::{self, Read},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, ExitStatus, Stdio},
+    thread,
+    time::{Duration, Instant},
 };
+
+const GIT_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct GitRunner {
@@ -32,6 +38,9 @@ impl GitRunner {
         S: AsRef<OsStr>,
     {
         let output = self.command(args)?;
+        if output.truncated {
+            return Err(GitError::output_limit());
+        }
         if output.status.success() {
             Ok(output.stdout)
         } else {
@@ -48,31 +57,113 @@ impl GitRunner {
         S: AsRef<OsStr>,
     {
         let output = self.command(args)?;
+        if output.truncated {
+            return Err(GitError::output_limit());
+        }
         Ok(output.status.success().then_some(output.stdout))
     }
 
-    pub fn run_with_paths(
+    pub fn run_with_literal_paths(
         &self,
         fixed_args: &[&str],
         paths: &[String],
     ) -> Result<Vec<u8>, GitError> {
         let mut args = fixed_args.iter().map(OsStr::new).collect::<Vec<_>>();
         args.push(OsStr::new("--"));
-        args.extend(paths.iter().map(OsStr::new));
+        let literal_paths = paths
+            .iter()
+            .map(|path| format!(":(literal){path}"))
+            .collect::<Vec<_>>();
+        args.extend(literal_paths.iter().map(OsStr::new));
         self.run(args)
     }
 
-    fn command<I, S>(&self, args: I) -> Result<std::process::Output, GitError>
+    fn command<I, S>(&self, args: I) -> Result<GitOutput, GitError>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        Command::new("git")
+        let mut child = Command::new("git")
             .current_dir(&self.repository)
             .args(args)
-            .output()
-            .map_err(|_| GitError::unavailable())
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_PAGER", "cat")
+            .spawn()
+            .map_err(|_| GitError::unavailable())?;
+        let stdout = child.stdout.take().ok_or_else(GitError::unavailable)?;
+        let stderr = child.stderr.take().ok_or_else(GitError::unavailable)?;
+        let stdout_reader = thread::spawn(move || read_limited(stdout));
+        let stderr_reader = thread::spawn(move || read_limited(stderr));
+        let started = Instant::now();
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) if started.elapsed() < GIT_TIMEOUT => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Ok(None) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    // A credential helper or transport may outlive Git while still
+                    // holding an inherited pipe. Detach the drainers here so the
+                    // timeout itself can never block while joining those pipes.
+                    drop(stdout_reader);
+                    drop(stderr_reader);
+                    return Err(GitError::timed_out());
+                }
+                Err(_) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    drop(stdout_reader);
+                    drop(stderr_reader);
+                    return Err(GitError::safe("Git process could not be monitored"));
+                }
+            }
+        };
+        let (stdout, stdout_truncated) = join_reader(stdout_reader)?;
+        let (stderr, stderr_truncated) = join_reader(stderr_reader)?;
+        Ok(GitOutput {
+            status,
+            stdout,
+            stderr,
+            truncated: stdout_truncated || stderr_truncated,
+        })
     }
+}
+
+struct GitOutput {
+    status: ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    truncated: bool,
+}
+
+fn read_limited(mut reader: impl Read) -> io::Result<(Vec<u8>, bool)> {
+    let mut output = Vec::with_capacity(MAX_OUTPUT_BYTES.min(8 * 1024));
+    let mut buffer = [0; 8 * 1024];
+    let mut truncated = false;
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            return Ok((output, truncated));
+        }
+        let remaining = MAX_OUTPUT_BYTES.saturating_sub(output.len());
+        let retained = remaining.min(count);
+        output.extend_from_slice(&buffer[..retained]);
+        truncated |= retained != count;
+    }
+}
+
+fn join_reader(
+    reader: thread::JoinHandle<io::Result<(Vec<u8>, bool)>>,
+) -> Result<(Vec<u8>, bool), GitError> {
+    reader
+        .join()
+        .map_err(|_| GitError::safe("Git process output could not be read"))?
+        .map_err(|_| GitError::safe("Git process output could not be read"))
 }
 
 impl GitError {
@@ -88,6 +179,14 @@ impl GitError {
 
     fn unavailable() -> Self {
         Self::safe("Git is unavailable on PATH")
+    }
+
+    fn timed_out() -> Self {
+        Self::safe("Git operation timed out and was stopped")
+    }
+
+    fn output_limit() -> Self {
+        Self::safe("Git operation produced too much output")
     }
 
     fn failed(code: Option<i32>, stderr: &str) -> Self {
@@ -273,7 +372,18 @@ fn sanitize_scp_remote(value: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{sanitize_remote_url, GitError};
+    use std::io::Cursor;
+
+    use super::{read_limited, sanitize_remote_url, GitError, MAX_OUTPUT_BYTES};
+
+    #[test]
+    fn bounded_reader_drains_output_without_retaining_more_than_the_limit() {
+        let input = vec![b'x'; MAX_OUTPUT_BYTES + 1];
+        let (output, truncated) = read_limited(Cursor::new(input)).expect("read output");
+
+        assert_eq!(output.len(), MAX_OUTPUT_BYTES);
+        assert!(truncated);
+    }
 
     #[test]
     fn query_token_stderr_is_not_returned() {

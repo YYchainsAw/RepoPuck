@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 use super::{
     model::{BranchSummary, RepositoryInfo, RepositorySnapshot},
@@ -9,6 +12,12 @@ use super::{
 #[derive(Clone, Debug)]
 pub struct GitService {
     runner: GitRunner,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RemoteTarget {
+    name: String,
+    merge_ref: String,
 }
 
 impl GitService {
@@ -47,15 +56,24 @@ impl GitService {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| repository_path.display().to_string());
-        let remote_url = self
-            .runner
-            .try_run(["config", "--get", "remote.origin.url"])?
-            .and_then(|value| sanitize_remote_url(text(&value).trim()));
+        let target_remote = if let Some(target) = self.upstream_target()? {
+            Some(target.name)
+        } else if self.remote_exists("origin")? {
+            Some("origin".to_owned())
+        } else {
+            None
+        };
+        let remote_url = target_remote
+            .as_deref()
+            .map(|remote| self.remote_url(remote))
+            .transpose()?
+            .flatten();
 
         Ok(RepositorySnapshot {
             repository: RepositoryInfo {
                 name,
                 path: repository_path.display().to_string(),
+                remote_name: target_remote,
                 remote_url,
             },
             current_branch,
@@ -80,21 +98,32 @@ impl GitService {
             self.runner
                 .run(["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
         let parsed = parse_changes_with_renames(&status, &[], &[]).map_err(GitError::safe)?;
+        let current_paths = parsed
+            .changes
+            .iter()
+            .map(|change| change.path.as_str())
+            .collect::<HashSet<_>>();
         let mut expanded_paths = Vec::with_capacity(paths.len() * 2);
         for path in paths {
+            if !current_paths.contains(path.as_str()) {
+                return Err(GitError::safe(
+                    "Selected path is no longer a current Git change",
+                ));
+            }
             if let Some(source) = parsed.rename_sources.get(path) {
                 expanded_paths.push(source.clone());
             }
             expanded_paths.push(path.clone());
         }
         if staged {
-            self.runner.run_with_paths(&["add"], &expanded_paths)?;
+            self.runner
+                .run_with_literal_paths(&["add"], &expanded_paths)?;
         } else if self.has_head()? {
             self.runner
-                .run_with_paths(&["restore", "--staged"], &expanded_paths)?;
+                .run_with_literal_paths(&["restore", "--staged"], &expanded_paths)?;
         } else {
             self.runner
-                .run_with_paths(&["rm", "--cached"], &expanded_paths)?;
+                .run_with_literal_paths(&["rm", "--cached"], &expanded_paths)?;
         }
         Ok(())
     }
@@ -125,20 +154,17 @@ impl GitService {
     }
 
     pub fn push(&self) -> Result<(), GitError> {
-        let upstream = self.runner.try_run([
-            "rev-parse",
-            "--abbrev-ref",
-            "--symbolic-full-name",
-            "@{upstream}",
-        ])?;
-        if upstream.is_some() {
-            self.runner.run(["push"])?;
+        let (target, set_upstream) = match self.upstream_target()? {
+            Some(target) => (target, false),
+            None => (self.origin_target()?, true),
+        };
+        self.require_remote(&target.name)?;
+        let refspec = format!("HEAD:{}", target.merge_ref);
+        if set_upstream {
+            self.runner
+                .run(["push", "--set-upstream", "--", &target.name, &refspec])?;
         } else {
-            let branch = self.current_branch()?;
-            if branch.is_empty() {
-                return Err(GitError::safe("Cannot push a detached HEAD"));
-            }
-            self.runner.run(["push", "-u", "origin", &branch])?;
+            self.runner.run(["push", "--", &target.name, &refspec])?;
         }
         Ok(())
     }
@@ -156,12 +182,18 @@ impl GitService {
     }
 
     pub fn fetch(&self) -> Result<(), GitError> {
-        self.runner.run(["fetch", "--prune"])?;
+        let remote = self.fetch_remote()?;
+        self.runner.run(["fetch", "--prune", "--", &remote])?;
         Ok(())
     }
 
     pub fn pull(&self) -> Result<(), GitError> {
-        self.runner.run(["pull", "--ff-only"])?;
+        let target = self
+            .upstream_target()?
+            .ok_or_else(|| GitError::safe("Current Git branch has no upstream"))?;
+        self.require_remote(&target.name)?;
+        self.runner
+            .run(["pull", "--ff-only", "--", &target.name, &target.merge_ref])?;
         Ok(())
     }
 
@@ -215,6 +247,71 @@ impl GitService {
             .map(|output| output.is_some())
     }
 
+    fn upstream_target(&self) -> Result<Option<RemoteTarget>, GitError> {
+        let branch = self.current_branch()?;
+        if branch.is_empty() {
+            return Ok(None);
+        }
+        let remote = self.config_value(&format!("branch.{branch}.remote"))?;
+        let merge_ref = self.config_value(&format!("branch.{branch}.merge"))?;
+        match (remote, merge_ref) {
+            (Some(name), Some(merge_ref)) if is_branch_ref(&merge_ref) => {
+                Ok(Some(RemoteTarget { name, merge_ref }))
+            }
+            (None, None) => Ok(None),
+            _ => Err(GitError::safe("Current Git branch has an invalid upstream")),
+        }
+    }
+
+    fn origin_target(&self) -> Result<RemoteTarget, GitError> {
+        let branch = self.current_branch()?;
+        if branch.is_empty() {
+            return Err(GitError::safe("Cannot push a detached HEAD"));
+        }
+        self.require_remote("origin")?;
+        Ok(RemoteTarget {
+            name: "origin".to_owned(),
+            merge_ref: format!("refs/heads/{branch}"),
+        })
+    }
+
+    fn fetch_remote(&self) -> Result<String, GitError> {
+        if let Some(target) = self.upstream_target()? {
+            self.require_remote(&target.name)?;
+            return Ok(target.name);
+        }
+        self.require_remote("origin")?;
+        Ok("origin".to_owned())
+    }
+
+    fn config_value(&self, key: &str) -> Result<Option<String>, GitError> {
+        self.runner.try_run(["config", "--get", key]).map(|value| {
+            value
+                .map(|value| text(&value).trim().to_owned())
+                .filter(|value| !value.is_empty())
+        })
+    }
+
+    fn remote_exists(&self, remote: &str) -> Result<bool, GitError> {
+        self.runner
+            .try_run(["remote", "get-url", "--", remote])
+            .map(|value| value.is_some())
+    }
+
+    fn require_remote(&self, remote: &str) -> Result<(), GitError> {
+        if self.remote_exists(remote)? {
+            Ok(())
+        } else {
+            Err(GitError::safe("Configured Git remote is unavailable"))
+        }
+    }
+
+    fn remote_url(&self, remote: &str) -> Result<Option<String>, GitError> {
+        self.runner
+            .try_run(["remote", "get-url", "--", remote])
+            .map(|value| value.and_then(|value| sanitize_remote_url(text(&value).trim())))
+    }
+
     fn ahead_behind(&self) -> Result<(u64, u64), GitError> {
         let Some(output) =
             self.runner
@@ -242,6 +339,12 @@ fn text(output: &[u8]) -> String {
 
 fn invalid_repository() -> GitError {
     GitError::safe("The selected directory is not a Git repository")
+}
+
+fn is_branch_ref(value: &str) -> bool {
+    value
+        .strip_prefix("refs/heads/")
+        .is_some_and(|name| !name.is_empty())
 }
 
 #[cfg(test)]
@@ -511,18 +614,32 @@ mod tests {
     fn first_push_sets_origin_upstream_and_later_push_uses_it() {
         let repository = TestRepository::new();
         let remote_path = repository.path.with_extension("remote.git");
+        let decoy_path = repository.path.with_extension("decoy.git");
         fs::create_dir(&remote_path).expect("create remote directory");
+        fs::create_dir(&decoy_path).expect("create decoy directory");
         let init = Command::new("git")
             .current_dir(&remote_path)
             .args(["init", "--bare"])
             .output()
             .expect("Git available on PATH");
         assert!(init.status.success());
+        let decoy_init = Command::new("git")
+            .current_dir(&decoy_path)
+            .args(["init", "--bare"])
+            .output()
+            .expect("Git available on PATH");
+        assert!(decoy_init.status.success());
         repository.git(&[
             "remote",
             "add",
             "origin",
             remote_path.to_string_lossy().as_ref(),
+        ]);
+        repository.git(&[
+            "remote",
+            "add",
+            "decoy",
+            decoy_path.to_string_lossy().as_ref(),
         ]);
         let service = GitService::open(&repository.path).expect("valid repository");
 
@@ -538,13 +655,52 @@ mod tests {
                 .trim(),
             "origin/main"
         );
+        let snapshot = service.snapshot().expect("snapshot");
+        assert_eq!(snapshot.repository.remote_name.as_deref(), Some("origin"));
+        assert_eq!(
+            snapshot.repository.remote_url.as_deref(),
+            Some(remote_path.to_string_lossy().as_ref())
+        );
 
+        repository.git(&["config", "remote.pushDefault", "decoy"]);
         fs::write(repository.path.join("tracked.txt"), "second push\n").expect("modify file");
         repository.git(&["add", "--", "tracked.txt"]);
         repository.git(&["commit", "-m", "second"]);
-        service.push().expect("push using existing upstream");
+        assert_eq!(service.fetch_remote().expect("fetch target"), "origin");
+        service.push().expect("push using explicit upstream");
+        let decoy_ref = Command::new("git")
+            .current_dir(&decoy_path)
+            .args(["show-ref", "--verify", "--quiet", "refs/heads/main"])
+            .output()
+            .expect("Git available on PATH");
+        assert!(
+            !decoy_ref.status.success(),
+            "push.default configuration must not redirect RepoPuck pushes"
+        );
 
         let _ = fs::remove_dir_all(&remote_path);
+        let _ = fs::remove_dir_all(&decoy_path);
+    }
+
+    #[test]
+    fn staging_rejects_pathspecs_and_paths_absent_from_current_status() {
+        let repository = TestRepository::new();
+        fs::write(repository.path.join("first.txt"), "first\n").expect("write first file");
+        fs::write(repository.path.join("second.txt"), "second\n").expect("write second file");
+        let service = GitService::open(&repository.path).expect("valid repository");
+
+        let error = service
+            .set_staged(&[":(glob)**".to_owned()], true)
+            .expect_err("pathspec must not be accepted as a changed path");
+
+        assert_eq!(
+            error.message(),
+            "Selected path is no longer a current Git change"
+        );
+        assert!(repository.git(&["diff", "--cached", "--quiet"]).is_empty());
+        let status = repository.git(&["status", "--porcelain=v1"]);
+        assert!(status.contains("?? first.txt"));
+        assert!(status.contains("?? second.txt"));
     }
 
     #[test]

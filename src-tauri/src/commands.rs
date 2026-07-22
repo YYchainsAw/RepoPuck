@@ -23,11 +23,11 @@ pub struct RepositoryState {
 
 impl RepositoryState {
     pub(crate) fn select(&self, path: PathBuf) -> Result<(), GitError> {
-        let service = GitService::open(&path)?;
         let mut selected = self
             .service
             .lock()
             .map_err(|_| GitError::safe("Repository state is unavailable"))?;
+        let service = GitService::open(&path)?;
         *selected = Some(service);
         Ok(())
     }
@@ -66,12 +66,14 @@ pub fn select_repository(
 ) -> OperationResult {
     let selected = PathBuf::from(path);
     match state.select(selected) {
-        Ok(()) => {
-            if let Ok(path) = state.selected_path() {
-                persist_recent_repository(&app, &path);
+        Ok(()) => match state.selected_path() {
+            Ok(path) if persist_recent_repository(&app, &path).is_ok() => {
+                OperationResult::success("Repository selected")
             }
-            OperationResult::success("Repository selected")
-        }
+            _ => OperationResult::success(
+                "Repository selected, but recent history could not be saved",
+            ),
+        },
         Err(error) => failure(error),
     }
 }
@@ -200,10 +202,8 @@ fn error_message(error: GitError) -> String {
     error.message().to_owned()
 }
 
-fn persist_recent_repository(app: &AppHandle, path: &Path) {
-    let Ok(store) = app.store("settings.json") else {
-        return;
-    };
+fn persist_recent_repository(app: &AppHandle, path: &Path) -> Result<(), ()> {
+    let store = app.store("settings.json").map_err(|_| ())?;
     let existing = store
         .get("recentRepositories")
         .and_then(|value| serde_json::from_value::<Vec<String>>(value).ok())
@@ -211,7 +211,7 @@ fn persist_recent_repository(app: &AppHandle, path: &Path) {
     let recent =
         crate::windowing::settings::remember_repository(&existing, &path.to_string_lossy());
     store.set("recentRepositories", serde_json::json!(recent));
-    let _ = store.save();
+    store.save().map_err(|_| ())
 }
 
 #[cfg(windows)]
@@ -327,8 +327,23 @@ mod tests {
             })
         });
 
+        let replacement = TestRepository::new();
+        let replacement_path = replacement.0.clone();
+        let (selection_done_tx, selection_done_rx) = mpsc::channel();
+        let selecting_state = Arc::clone(&state);
+        let selecting = thread::spawn(move || {
+            let result = selecting_state.select(replacement_path);
+            selection_done_tx
+                .send(result)
+                .expect("report repository selection");
+        });
+
         assert!(matches!(
             second_entered_rx.recv_timeout(Duration::from_millis(150)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        assert!(matches!(
+            selection_done_rx.recv_timeout(Duration::from_millis(150)),
             Err(mpsc::RecvTimeoutError::Timeout)
         ));
         release_tx.send(()).expect("release first operation");
@@ -343,5 +358,10 @@ mod tests {
             .join()
             .expect("second thread")
             .expect("second operation");
+        selection_done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("selection finished after release")
+            .expect("select replacement repository");
+        selecting.join().expect("selection thread");
     }
 }
