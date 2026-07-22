@@ -284,7 +284,7 @@ it("animates top-island transitions from the top center and acknowledges complet
   );
 });
 
-it("uses the drawer closing animation and disables its three north resize handles", async () => {
+it("uses the drawer closing animation and removes resize overlays", async () => {
   Reflect.set(window, "__TAURI_INTERNALS__", {});
   nativeShell.current.state.mode = "top-drawer";
   nativeShell.current.state.panelPhase = "closing";
@@ -308,7 +308,14 @@ it("uses the drawer closing animation and disables its three north resize handle
     Array.from(container.querySelectorAll("[data-resize-direction]")).map((handle) =>
       handle.getAttribute("data-resize-direction"),
     ),
-  ).toEqual(["East", "SouthEast", "South", "SouthWest", "West"]);
+  ).toEqual([]);
+
+  const drawerCloseKeyframes = Array.from(document.styleSheets)
+    .flatMap((sheet) => Array.from(sheet.cssRules))
+    .find((rule) => rule.cssText.includes("@keyframes panel-drawer-close"));
+  expect(drawerCloseKeyframes?.cssText).toContain("opacity");
+  expect(drawerCloseKeyframes?.cssText).toContain("transform");
+  expect(drawerCloseKeyframes?.cssText).not.toContain("clip-path");
 
   fireEvent.animationEnd(content!);
   await waitFor(() =>

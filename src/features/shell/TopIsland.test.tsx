@@ -19,27 +19,46 @@ function createClient(): NativeShellClient {
   };
 }
 
-it("renders a compact 240 by 48 GitHub-style island", () => {
-  render(<TopIsland changeCount={3} expanded={false} client={createClient()} />);
+it("renders a 260 by 52 top-docked surface without capsule styling", () => {
+  const { container } = render(
+    <TopIsland changeCount={3} expanded={false} client={createClient()} />,
+  );
 
   const island = screen.getByRole("button", {
     name: "Show RepoPuck Git panel, 3 changed files",
   });
+  const surface = container.querySelector<HTMLElement>(".top-island-surface");
+  expect(surface).toHaveAttribute("data-placement", "top-edge");
+  expect(surface).toHaveAttribute("data-expanded", "false");
+  expect(getComputedStyle(surface!).width).toBe("260px");
+  expect(getComputedStyle(surface!).height).toBe("52px");
   expect(island).toHaveAttribute("aria-expanded", "false");
-  expect(getComputedStyle(island).width).toBe("240px");
+  expect(getComputedStyle(island).width).toBe("260px");
   expect(getComputedStyle(island).height).toBe("48px");
+  expect(getComputedStyle(island).borderTopWidth).toBe("0");
+  expect(getComputedStyle(island).borderRadius).toBe(
+    "0 0 var(--panel-radius) var(--panel-radius)",
+  );
   expect(screen.getByText("RepoPuck")).toBeInTheDocument();
   expect(screen.getByText("3 changed files")).toBeInTheDocument();
 });
 
-it("toggles from pointer or keyboard activation and exposes expanded state", () => {
+it("toggles from pointer or keyboard activation and exposes a clear expanded state", () => {
   const client = createClient();
-  render(<TopIsland changeCount={0} expanded client={client} />);
+  const { container } = render(
+    <TopIsland changeCount={0} expanded client={client} />,
+  );
   const island = screen.getByRole("button", {
     name: "Hide RepoPuck Git panel, no changed files",
   });
 
   expect(island).toHaveAttribute("aria-expanded", "true");
+  expect(container.querySelector(".top-island-surface")).toHaveAttribute(
+    "data-expanded",
+    "true",
+  );
+  expect(getComputedStyle(island).borderBottomColor).toBe("var(--panel-focus)");
+  expect(getComputedStyle(island).boxShadow).toContain("inset 0 -2px 0");
   fireEvent.click(island);
   fireEvent.keyDown(island, { key: "Enter" });
   fireEvent.click(island);

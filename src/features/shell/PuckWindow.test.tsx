@@ -84,13 +84,16 @@ it("refreshes the count from native events and unregisters on unmount", async ()
 it("renders the top island with the same lightweight count", () => {
   shell.current.state.mode = "top-island";
   shell.current.state.panelPhase = "open";
-  render(<PuckWindow />);
+  const { container } = render(<PuckWindow />);
 
-  expect(
-    screen.getByRole("button", {
-      name: "Hide RepoPuck Git panel, 3 changed files",
-    }),
-  ).toHaveAttribute("aria-expanded", "true");
+  const island = screen.getByRole("button", {
+    name: "Hide RepoPuck Git panel, 3 changed files",
+  });
+  expect(island).toHaveAttribute("aria-expanded", "true");
+  const surface = container.querySelector<HTMLElement>(".top-island-surface");
+  expect(surface).toHaveAttribute("data-placement", "top-edge");
+  expect(getComputedStyle(surface!).width).toBe("260px");
+  expect(getComputedStyle(surface!).height).toBe("52px");
   expect(count.usePuckChangeCount).toHaveBeenCalledWith({ pollIntervalMs: 30_000 });
 });
 
