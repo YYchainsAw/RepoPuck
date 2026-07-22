@@ -229,9 +229,15 @@ html[data-window-view="puck"] #root {
   padding: 8px 16px;
 }
 
-.panel-notice > span {
+.panel-notice__message {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.panel-notice__copy-status {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .panel-notice button {
