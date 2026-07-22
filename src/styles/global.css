@@ -160,6 +160,10 @@ html[data-window-view="puck"][data-shell-mode="top-drawer"] #root {
   opacity: 0;
 }
 
+.panel-window-content--closing {
+  pointer-events: none;
+}
+
 @keyframes panel-corner-open {
   from {
     opacity: 0;
@@ -219,24 +223,24 @@ html[data-window-view="puck"][data-shell-mode="top-drawer"] #root {
 @keyframes panel-drawer-open {
   from {
     opacity: 0;
-    transform: translateY(-12px) scaleY(0.97);
+    transform: translateY(-12px);
   }
 
   to {
     opacity: 1;
-    transform: translateY(0) scaleY(1);
+    transform: translateY(0);
   }
 }
 
 @keyframes panel-drawer-close {
   from {
     opacity: 1;
-    transform: translateY(0) scaleY(1);
+    transform: translateY(0);
   }
 
   to {
     opacity: 0;
-    transform: translateY(-12px) scaleY(0.97);
+    transform: translateY(-12px);
   }
 }
 

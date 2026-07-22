@@ -51,6 +51,8 @@
 }
 
 .top-island-surface {
+  --top-island-shadow: 0 2px 2px -1px color-mix(in srgb, var(--panel-border) 75%, transparent);
+
   align-items: flex-start;
   display: flex;
   height: 52px;
@@ -65,7 +67,7 @@
   border: 1px solid var(--panel-border);
   border-radius: 0 0 var(--panel-radius) var(--panel-radius);
   border-top: 0;
-  box-shadow: var(--panel-shadow);
+  box-shadow: var(--top-island-shadow);
   color: var(--panel-text);
   cursor: pointer;
   display: grid;
@@ -134,7 +136,7 @@
 .top-island-button[aria-expanded="true"] {
   background: var(--panel-subtle);
   border-bottom-color: var(--panel-focus);
-  box-shadow: var(--panel-shadow), inset 0 -2px 0 var(--panel-focus);
+  box-shadow: var(--top-island-shadow), inset 0 -2px 0 var(--panel-focus);
 }
 
 .drawer-drag-handle {

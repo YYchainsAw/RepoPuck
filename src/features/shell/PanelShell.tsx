@@ -132,7 +132,10 @@ export function PanelShell() {
         >
           <DrawerDragHandle
             mode={nativeShell.state.mode}
-            closing={nativeShell.state.panelPhase === "closing"}
+            closing={
+              nativeShell.transition?.direction === "close" ||
+              nativeShell.state.panelPhase === "closing"
+            }
           />
           {workspace.snapshot ? (
             <>

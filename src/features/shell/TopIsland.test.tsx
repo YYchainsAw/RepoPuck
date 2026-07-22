@@ -32,6 +32,11 @@ it("renders a 260 by 52 top-docked surface without capsule styling", () => {
   expect(surface).toHaveAttribute("data-expanded", "false");
   expect(getComputedStyle(surface!).width).toBe("260px");
   expect(getComputedStyle(surface!).height).toBe("52px");
+  expect(
+    getComputedStyle(surface!).getPropertyValue("--top-island-shadow").trim(),
+  ).toBe(
+    "0 2px 2px -1px color-mix(in srgb, var(--panel-border) 75%, transparent)",
+  );
   expect(island).toHaveAttribute("aria-expanded", "false");
   expect(getComputedStyle(island).width).toBe("260px");
   expect(getComputedStyle(island).height).toBe("48px");
@@ -58,6 +63,9 @@ it("toggles from pointer or keyboard activation and exposes a clear expanded sta
     "true",
   );
   expect(getComputedStyle(island).borderBottomColor).toBe("var(--panel-focus)");
+  expect(getComputedStyle(island).boxShadow).toContain(
+    "var(--top-island-shadow)",
+  );
   expect(getComputedStyle(island).boxShadow).toContain("inset 0 -2px 0");
   fireEvent.click(island);
   fireEvent.keyDown(island, { key: "Enter" });

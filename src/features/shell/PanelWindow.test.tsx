@@ -304,6 +304,7 @@ it("uses the drawer closing animation and removes resize overlays", async () => 
     "panel-window-content--closing",
     "panel-window-content--drawer-roll",
   );
+  expect(getComputedStyle(content!).pointerEvents).toBe("none");
   expect(
     Array.from(container.querySelectorAll("[data-resize-direction]")).map((handle) =>
       handle.getAttribute("data-resize-direction"),
@@ -314,8 +315,9 @@ it("uses the drawer closing animation and removes resize overlays", async () => 
     .flatMap((sheet) => Array.from(sheet.cssRules))
     .find((rule) => rule.cssText.includes("@keyframes panel-drawer-close"));
   expect(drawerCloseKeyframes?.cssText).toContain("opacity");
-  expect(drawerCloseKeyframes?.cssText).toContain("transform");
+  expect(drawerCloseKeyframes?.cssText).toContain("translateY");
   expect(drawerCloseKeyframes?.cssText).not.toContain("clip-path");
+  expect(drawerCloseKeyframes?.cssText).not.toContain("scaleY");
 
   fireEvent.animationEnd(content!);
   await waitFor(() =>

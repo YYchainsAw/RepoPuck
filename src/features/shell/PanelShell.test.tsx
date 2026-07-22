@@ -7,12 +7,16 @@ import "../../styles/global.css";
 import type { GitWorkspaceValue } from "../git/useGitWorkspace";
 import type { NativeShellClient, NativeShellListeners } from "./nativeClient";
 import type { ShellSettingsValue } from "./ShellSettingsProvider";
+import type { NativeShellStateValue } from "./useNativeShellState";
 import { PanelShell } from "./PanelShell";
 
 const workspace = vi.hoisted(() => ({ current: {} as GitWorkspaceValue }));
 const dialog = vi.hoisted(() => ({ open: vi.fn() }));
 const shell = vi.hoisted(() => ({ current: {} as ShellSettingsValue }));
 const native = vi.hoisted(() => ({ current: {} as NativeShellClient }));
+const nativeShellState = vi.hoisted(() => ({
+  current: {} as NativeShellStateValue,
+}));
 const nativeListeners = vi.hoisted(() => ({ current: null as NativeShellListeners | null }));
 
 vi.mock("../git/useGitWorkspace", () => ({
@@ -29,6 +33,10 @@ vi.mock("./ShellSettingsProvider", () => ({
 
 vi.mock("./nativeClient", () => ({
   createNativeShellClient: () => native.current,
+}));
+
+vi.mock("./useNativeShellState", () => ({
+  useNativeShellState: () => nativeShellState.current,
 }));
 
 const snapshot = {
@@ -93,6 +101,20 @@ beforeEach(() => {
     clearRecentRepositories: vi.fn(),
   };
   nativeListeners.current = null;
+  nativeShellState.current = {
+    state: {
+      mode: "puck",
+      panelPhase: "hidden",
+      transitionId: null,
+      activeMonitorName: null,
+      dockCorner: null,
+    },
+    transition: null,
+    modePending: false,
+    modeError: null,
+    setMode: vi.fn().mockResolvedValue(undefined),
+    completeTransition: vi.fn().mockResolvedValue(undefined),
+  };
   native.current = {
     togglePanel: vi.fn().mockResolvedValue(undefined),
     setPanelPinned: vi.fn().mockResolvedValue(undefined),
@@ -108,6 +130,27 @@ beforeEach(() => {
 });
 
 describe("PanelShell", () => {
+  it("removes the drawer drag control on the first close-transition event", () => {
+    nativeShellState.current.state.mode = "top-drawer";
+    nativeShellState.current.state.panelPhase = "open";
+    nativeShellState.current.transition = {
+      transitionId: 21,
+      mode: "top-drawer",
+      direction: "close",
+      animation: "drawer-roll",
+      anchor: "top-center",
+      durationMs: 200,
+    };
+
+    const { container } = render(<PanelShell />);
+
+    expect(screen.queryByRole("button", { name: "Move top drawer" })).toBeNull();
+    expect(container.querySelector(".drawer-drag-handle--inactive")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+  });
+
   it("switches branches and creates a branch from the branch menu", () => {
     render(<PanelShell />);
 
