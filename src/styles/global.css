@@ -211,6 +211,10 @@ html[data-window-view="puck"] #root {
 .action-menu-item small {
   color: var(--panel-muted);
   font-size: 11px;
+  max-width: 88px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .action-menu-divider {
@@ -223,6 +227,17 @@ html[data-window-view="puck"] #root {
   gap: 8px;
   min-height: 40px;
   padding: 8px 16px;
+}
+
+.panel-notice > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.panel-notice button {
+  flex: 0 0 auto;
+  min-height: 32px;
+  min-width: 32px;
 }
 
 .panel-notice--success {
@@ -452,6 +467,18 @@ html[data-window-view="puck"] #root {
 
 .create-branch-form label {
   font-weight: 600;
+}
+
+.dialog-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.dialog-actions button {
+  min-height: var(--panel-control-height);
 }
 
 button:focus-visible,

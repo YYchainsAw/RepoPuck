@@ -48,6 +48,14 @@ export function Puck({ changeCount, client: injectedClient }: PuckProps) {
     origin.current = null;
   };
 
+  const togglePanel = () => {
+    if (suppressClick.current) {
+      suppressClick.current = false;
+      return;
+    }
+    void clientRef.current.togglePanel();
+  };
+
   return (
     <main className="puck-surface" aria-label="RepoPuck launcher">
       <button
@@ -59,12 +67,11 @@ export function Puck({ changeCount, client: injectedClient }: PuckProps) {
         onPointerMove={movePointer}
         onPointerUp={endPointer}
         onPointerCancel={endPointer}
-        onClick={() => {
-          if (suppressClick.current) {
-            suppressClick.current = false;
-            return;
-          }
-          void clientRef.current.togglePanel();
+        onClick={togglePanel}
+        onKeyDown={(event) => {
+          if (event.repeat || (event.key !== "Enter" && event.key !== " ")) return;
+          event.preventDefault();
+          togglePanel();
         }}
         onContextMenu={(event) => {
           event.preventDefault();

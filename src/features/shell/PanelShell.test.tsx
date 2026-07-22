@@ -59,6 +59,7 @@ function createWorkspace(overrides: Partial<GitWorkspaceValue> = {}): GitWorkspa
     commitMessage: "Ship it",
     busyAction: null,
     notice: null,
+    clearNotice: vi.fn(),
     error: null,
     refresh: vi.fn(),
     setCommitMessage: vi.fn(),
@@ -153,6 +154,19 @@ describe("PanelShell", () => {
     expect(workspace.current.amendLastCommit).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps amend dialog actions aligned horizontally at the dialog edge", () => {
+    render(<PanelShell />);
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Amend last commit" }));
+
+    const actions = screen.getByRole("button", { name: "Cancel" }).parentElement!;
+    expect(actions).toHaveClass("dialog-actions");
+    expect(getComputedStyle(actions).display).toBe("flex");
+    expect(getComputedStyle(actions).flexWrap).toBe("wrap");
+    expect(getComputedStyle(actions).justifyContent).toBe("flex-end");
+    expect(getComputedStyle(actions).gap).toBe("8px");
+  });
+
   it("closes open menus with Escape", () => {
     render(<PanelShell />);
     const trigger = screen.getByRole("button", { name: "More actions" });
@@ -172,6 +186,13 @@ describe("PanelShell", () => {
     fireEvent.click(trigger);
 
     expect(screen.getByRole("menuitem", { name: "Fetch" })).toHaveFocus();
+  });
+
+  it("marks the overflow divider as a menu separator", () => {
+    render(<PanelShell />);
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+
+    expect(screen.getByRole("separator")).toHaveClass("action-menu-divider");
   });
 
   it("supports arrow, Home, and End navigation across enabled menu items", () => {
@@ -291,6 +312,56 @@ describe("PanelShell", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Authentication failed");
     expect(screen.getByText("Pulling…")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh repository" })).toBeDisabled();
+  });
+
+  it("dismisses completed success feedback and exposes error copying", () => {
+    workspace.current = createWorkspace({
+      notice: "Fetched from remote",
+      error: "Authentication failed",
+    });
+    render(<PanelShell />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
+    expect(workspace.current.clearNotice).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Copy error details" })).toBeInTheDocument();
+  });
+
+  it("supplies Primer dark tokens to the repository picker, counter, input, and buttons", () => {
+    document.documentElement.dataset.colorMode = "dark";
+    document.documentElement.dataset.lightTheme = "light";
+    document.documentElement.dataset.darkTheme = "dark";
+    shell.current = { ...shell.current, colorMode: "dark" };
+    render(<PanelShell />);
+
+    const panel = screen.getByRole("region", { name: "RepoPuck Git panel" });
+    const picker = screen.getByRole("button", { name: "repopuck" });
+    const counter = screen.getByText("1", { exact: true });
+    const message = screen.getByRole("textbox", { name: "Commit message" });
+    const messageWrapper = message.closest('[class*="TextInputBaseWrapper"]')!;
+    const commit = screen.getByRole("button", { name: "Commit" });
+    expect(panel).toHaveAttribute("data-color-mode", "dark");
+    expect(getComputedStyle(document.documentElement).getPropertyValue("--control-bgColor-rest").trim()).toBe("#212830");
+    expect(getComputedStyle(document.documentElement).getPropertyValue("--fgColor-default").trim()).toBe("#f0f6fc");
+    expect(getComputedStyle(picker).backgroundColor).toContain("--button-default-bgColor-rest");
+    expect(getComputedStyle(counter).backgroundColor).toContain("--bgColor-neutral-muted");
+    expect(getComputedStyle(messageWrapper).backgroundColor).toContain("--bgColor-default");
+    expect(getComputedStyle(commit).backgroundColor).toContain("--button-primary-bgColor-rest");
+    delete document.documentElement.dataset.colorMode;
+    delete document.documentElement.dataset.lightTheme;
+    delete document.documentElement.dataset.darkTheme;
+  });
+
+  it("identifies the Push remote in the overflow menu when one is available", () => {
+    workspace.current = createWorkspace({
+      snapshot: {
+        ...snapshot,
+        repository: { ...snapshot.repository, remoteName: "origin" },
+      },
+    });
+    render(<PanelShell />);
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+
+    expect(screen.getByRole("menuitem", { name: "Push origin" })).toBeInTheDocument();
   });
 
   it("persists pin and dark theme choices through the shell settings", () => {

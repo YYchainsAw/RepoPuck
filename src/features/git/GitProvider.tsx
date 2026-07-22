@@ -261,6 +261,7 @@ export function GitProvider({
       commitMessage,
       busyAction,
       notice,
+      clearNotice: () => setNotice(null),
       error: actionError ?? refreshError,
       refresh,
       setCommitMessage,

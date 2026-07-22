@@ -19,12 +19,14 @@ import {
 interface MenuAction {
   label: string;
   icon: ComponentType<{ size?: number }>;
+  detail?: string;
   run(): void;
 }
 
 interface ActionMenuProps {
   open: boolean;
   busy: boolean;
+  remoteName?: string;
   triggerRef: RefObject<HTMLButtonElement | null>;
   onClose(): void;
   onOpenSettings(): void;
@@ -42,6 +44,7 @@ interface ActionMenuProps {
 export function ActionMenu({
   open,
   busy,
+  remoteName,
   triggerRef,
   onClose,
   onOpenSettings,
@@ -53,7 +56,7 @@ export function ActionMenu({
   const items: MenuAction[] = [
     { label: "Fetch", icon: SyncIcon, run: actions.fetch },
     { label: "Pull", icon: DownloadIcon, run: actions.pull },
-    { label: "Push", icon: UploadIcon, run: actions.push },
+    { label: "Push", icon: UploadIcon, detail: remoteName, run: actions.push },
     { label: "Stash", icon: ArchiveIcon, run: actions.stash },
     { label: "Open terminal", icon: TerminalIcon, run: actions.openTerminal },
     { label: "Open Explorer", icon: FileDirectoryIcon, run: actions.openExplorer },
@@ -129,52 +132,53 @@ export function ActionMenu({
       aria-label="Repository actions"
       onKeyDown={moveFocus}
     >
-          {items.map(({ label, icon: Icon, run }, index) => (
-            <button
-              key={label}
-              className="action-menu-item"
-              type="button"
-              role="menuitem"
-              tabIndex={index === 0 ? 0 : -1}
-              disabled={busy}
-              onClick={() => {
-                run();
-                closeAndRestoreFocus();
-              }}
-            >
-              <Icon size={16} aria-hidden="true" />
-              {label}
-            </button>
-          ))}
-          <div className="action-menu-divider" />
-          <button
-            className="action-menu-item"
-            type="button"
-            role="menuitem"
-            tabIndex={-1}
-            disabled={busy}
-            onClick={() => {
-              onAmendLastCommit();
-              closeAndRestoreFocus();
-            }}
-          >
-            <GitCommitIcon size={16} aria-hidden="true" />
-            Amend last commit
-          </button>
-          <button
-            className="action-menu-item"
-            type="button"
-            role="menuitem"
-            tabIndex={-1}
-            disabled={busy}
-            onClick={() => {
-              onOpenSettings();
-              closeAndRestoreFocus();
-            }}
-          >
-            <GearIcon size={16} aria-hidden="true" />
-            Settings
-          </button>
+      {items.map(({ label, icon: Icon, detail, run }, index) => (
+        <button
+          key={label}
+          className="action-menu-item"
+          type="button"
+          role="menuitem"
+          tabIndex={index === 0 ? 0 : -1}
+          disabled={busy}
+          onClick={() => {
+            run();
+            closeAndRestoreFocus();
+          }}
+        >
+          <Icon size={16} aria-hidden="true" />
+          <span>{label}</span>
+          {detail && <small>{detail}</small>}
+        </button>
+      ))}
+      <div className="action-menu-divider" role="separator" />
+      <button
+        className="action-menu-item"
+        type="button"
+        role="menuitem"
+        tabIndex={-1}
+        disabled={busy}
+        onClick={() => {
+          onAmendLastCommit();
+          closeAndRestoreFocus();
+        }}
+      >
+        <GitCommitIcon size={16} aria-hidden="true" />
+        Amend last commit
+      </button>
+      <button
+        className="action-menu-item"
+        type="button"
+        role="menuitem"
+        tabIndex={-1}
+        disabled={busy}
+        onClick={() => {
+          onOpenSettings();
+          closeAndRestoreFocus();
+        }}
+      >
+        <GearIcon size={16} aria-hidden="true" />
+        Settings
+      </button>
     </div>
   );
 }

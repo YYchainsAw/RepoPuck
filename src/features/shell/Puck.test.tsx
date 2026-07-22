@@ -2,6 +2,8 @@
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+import "../../styles/tokens.css";
+import "../../styles/global.css";
 import type { NativeShellClient } from "./nativeClient";
 import { Puck } from "./Puck";
 
@@ -27,10 +29,38 @@ it("shows the changed-file badge and toggles the panel on click", () => {
   expect(client.togglePanel).toHaveBeenCalledTimes(1);
 });
 
+it("keeps the launcher keyboard-focusable and opens the panel with Enter or Space", () => {
+  const client = createClient();
+  render(<Puck changeCount={0} client={client} />);
+  const puck = screen.getByRole("button", { name: "Open Git panel, no changed files" });
+
+  puck.focus();
+  expect(puck).toHaveFocus();
+  fireEvent.keyDown(puck, { key: "Enter" });
+  fireEvent.keyDown(puck, { key: " " });
+  fireEvent.keyDown(puck, { key: "Enter", repeat: true });
+
+  expect(client.togglePanel).toHaveBeenCalledTimes(2);
+});
+
 it("caps a large visible badge without losing its accessible count", () => {
   render(<Puck changeCount={143} client={createClient()} />);
 
   expect(screen.getByText("99+")).toHaveAccessibleName("143 changed files");
+});
+
+it("uses dark tokens for a readable change-count badge", () => {
+  document.documentElement.dataset.colorMode = "dark";
+  document.documentElement.dataset.lightTheme = "light";
+  document.documentElement.dataset.darkTheme = "dark";
+  render(<Puck changeCount={4} client={createClient()} />);
+
+  const badge = screen.getByText("4");
+  expect(getComputedStyle(badge).backgroundColor).toBe("rgb(13, 17, 23)");
+  expect(getComputedStyle(badge).color).toBe("rgb(230, 237, 243)");
+  delete document.documentElement.dataset.colorMode;
+  delete document.documentElement.dataset.lightTheme;
+  delete document.documentElement.dataset.darkTheme;
 });
 
 it("opens the native menu on right click", () => {

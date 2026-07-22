@@ -371,6 +371,23 @@ describe("useGitWorkspace", () => {
     expect(client.getSnapshot).toHaveBeenCalledTimes(2);
   });
 
+  it("clears completed success feedback when it is dismissed", async () => {
+    const client = createTestClient();
+    client.push.mockResolvedValueOnce({ success: true, message: "Changes pushed" });
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    await act(async () => {
+      await result.current.push();
+    });
+    expect(result.current.notice).toBe("Changes pushed");
+
+    act(() => result.current.clearNotice());
+    expect(result.current.notice).toBeNull();
+  });
+
   it("ignores concurrent actions while a mutation is busy", async () => {
     const client = createTestClient();
     let finishStage!: (result: OperationResult) => void;

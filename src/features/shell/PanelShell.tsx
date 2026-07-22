@@ -99,7 +99,11 @@ export function PanelShell() {
 
   const feedback = (
     <>
-      {workspace.notice && <Notice kind="success">{workspace.notice}</Notice>}
+      {workspace.notice && (
+        <Notice kind="success" onDismiss={workspace.clearNotice}>
+          {workspace.notice}
+        </Notice>
+      )}
       {workspace.error && <Notice kind="error">{workspace.error}</Notice>}
       {workspace.busyAction && (
         <div className="busy-status" aria-live="polite">
@@ -144,6 +148,7 @@ export function PanelShell() {
                 <ActionMenu
                   open={menuOpen}
                   busy={busy}
+                  remoteName={workspace.snapshot.repository.remoteName}
                   triggerRef={menuButtonRef}
                   onClose={closeActionMenu}
                   onOpenSettings={() => setSettingsOpen(true)}

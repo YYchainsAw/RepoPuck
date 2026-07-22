@@ -23,6 +23,7 @@ export interface GitWorkspaceValue {
   commitMessage: string;
   busyAction: GitAction | null;
   notice: string | null;
+  clearNotice(): void;
   error: string | null;
   refresh(): Promise<void>;
   setCommitMessage(message: string): void;
