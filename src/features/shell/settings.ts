@@ -86,6 +86,8 @@ export function applyThemePreference(
 ): "light" | "dark" {
   const resolved = resolveTheme(preference, prefersDark);
   if (typeof document !== "undefined") {
+    document.documentElement.dataset.lightTheme = "light";
+    document.documentElement.dataset.darkTheme = "dark";
     document.documentElement.dataset.colorMode = resolved;
     document.documentElement.style.colorScheme = resolved;
   }

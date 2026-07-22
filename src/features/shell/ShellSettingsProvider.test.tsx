@@ -29,6 +29,10 @@ it("reactively resolves system theme changes for shell consumers", () => {
   );
 
   expect(screen.getByRole("status")).toHaveTextContent("light");
+  expect(document.documentElement).toHaveAttribute("data-color-mode", "light");
+  expect(document.documentElement).toHaveAttribute("data-light-theme", "light");
+  expect(document.documentElement).toHaveAttribute("data-dark-theme", "dark");
   act(() => listener?.({ matches: true } as MediaQueryListEvent));
   expect(screen.getByRole("status")).toHaveTextContent("dark");
+  expect(document.documentElement).toHaveAttribute("data-color-mode", "dark");
 });

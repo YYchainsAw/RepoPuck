@@ -16,10 +16,10 @@
   },
   "dependencies": {
     "@primer/octicons-react": "^19.19.0",
+    "@primer/primitives": "11.9.0",
     "@primer/react": "^38.14.0",
     "@tauri-apps/api": "^2.7.0",
     "@tauri-apps/plugin-dialog": "^2.2.0",
-    "@tauri-apps/plugin-fs": "^2.2.0",
     "@tauri-apps/plugin-store": "2.4.0",
     "@vitejs/plugin-react": "5.0.4",
     "react": "19.2.0",
