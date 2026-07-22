@@ -3,8 +3,9 @@ use std::{thread, time::Duration, time::Instant};
 use tauri::{AppHandle, Manager};
 
 use super::{
-    drawer_hover_intent, drawer_is_active, perform_drawer_intent,
-    position::{padded_rect, top_center_hot_zone, Point, Rect},
+    drawer_anchor_for_monitor_key, drawer_hover_intent, drawer_is_active, monitor_storage_key,
+    perform_drawer_intent,
+    position::{padded_rect, top_anchor_hot_zone, Point, Rect},
     state::{PanelIntent, PanelPhase},
     PANEL_LABEL,
 };
@@ -21,6 +22,7 @@ const DEFAULT_PANEL_LOGICAL_WIDTH: f64 = 420.0;
 #[derive(Clone, Debug)]
 struct MonitorSample {
     name: Option<String>,
+    storage_key: String,
     bounds: Rect,
     work_area: Rect,
     scale_factor: f64,
@@ -76,12 +78,13 @@ fn watch(app: AppHandle) {
             })
             .unwrap_or(DEFAULT_PANEL_LOGICAL_WIDTH as u32);
         let in_hot_zone = cursor_monitor.is_some_and(|monitor| {
-            let zone = top_center_hot_zone(
+            let zone = top_anchor_hot_zone(
                 monitor.work_area,
                 panel_width,
                 logical_to_physical(HOT_ZONE_LOGICAL_EXTRA_WIDTH, monitor.scale_factor),
                 logical_to_physical(HOT_ZONE_LOGICAL_MIN_WIDTH, monitor.scale_factor),
                 logical_to_physical(HOT_ZONE_LOGICAL_HEIGHT, monitor.scale_factor),
+                drawer_anchor_for_monitor_key(&app, &monitor.storage_key),
             );
             zone.contains(cursor)
         });
@@ -124,14 +127,17 @@ fn monitor_samples(app: &AppHandle) -> Vec<MonitorSample> {
             let bounds_position = monitor.position();
             let bounds_size = monitor.size();
             let work_area = monitor.work_area();
+            let bounds = Rect::new(
+                bounds_position.x,
+                bounds_position.y,
+                bounds_size.width,
+                bounds_size.height,
+            );
+            let name = monitor.name().cloned();
             MonitorSample {
-                name: monitor.name().cloned(),
-                bounds: Rect::new(
-                    bounds_position.x,
-                    bounds_position.y,
-                    bounds_size.width,
-                    bounds_size.height,
-                ),
+                storage_key: monitor_storage_key(name.as_deref(), bounds),
+                name,
+                bounds,
                 work_area: Rect::new(
                     work_area.position.x,
                     work_area.position.y,

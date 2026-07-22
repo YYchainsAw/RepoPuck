@@ -18,9 +18,10 @@ use tauri::{
 use tauri_plugin_store::StoreExt;
 
 use self::position::{
-    clamp_window_position, dock_safe_panel_work_area, fit_window_inner_size, panel_placement,
-    puck_position, restore_relative_position, top_center_position, window_frame_size,
-    work_area_below_anchor, DockCorner, Point, Rect, Size,
+    anchored_top_position, clamp_window_position, dock_safe_panel_work_area, fit_window_inner_size,
+    horizontal_anchor_for_position, normalize_horizontal_anchor, panel_placement, puck_position,
+    restore_relative_position, top_center_position, window_frame_size, work_area_below_anchor,
+    DockCorner, Point, Rect, Size,
 };
 use self::state::{
     should_restore_panel_after_mode_change, stable_panel_phase, PanelIntent, PanelPhase,
@@ -36,9 +37,9 @@ const PANEL_TRANSITION_EVENT: &str = "panel_transition";
 const SETTINGS_FILE: &str = "settings.json";
 const DEFAULT_PUCK_MARGIN: i32 = 24;
 const PUCK_LOGICAL_SIZE: f64 = 58.0;
-const ISLAND_LOGICAL_WIDTH: f64 = 240.0;
-const ISLAND_LOGICAL_HEIGHT: f64 = 48.0;
-const ISLAND_TOP_OFFSET: f64 = 8.0;
+const ISLAND_LOGICAL_WIDTH: f64 = 260.0;
+const ISLAND_LOGICAL_HEIGHT: f64 = 52.0;
+const ISLAND_TOP_OFFSET: f64 = 0.0;
 const PANEL_MIN_WIDTH: f64 = 360.0;
 const PANEL_MIN_HEIGHT: f64 = 560.0;
 const PANEL_MAX_WIDTH: f64 = 720.0;
@@ -47,6 +48,7 @@ const PUCK_TRANSITION_MS: u64 = 160;
 const ISLAND_TRANSITION_MS: u64 = 180;
 const DRAWER_TRANSITION_MS: u64 = 220;
 const TRANSITION_FALLBACK_GRACE_MS: u64 = 100;
+const DEFAULT_DRAWER_ANCHOR: f64 = 0.5;
 
 #[derive(Default)]
 pub struct ShellState {
@@ -113,6 +115,7 @@ struct ModeSwitchRollback {
     panel_size: PersistedPanelSize,
     dock_corner: Option<DockCorner>,
     active_monitor_name: Option<String>,
+    drawer_anchors: HashMap<String, f64>,
 }
 
 pub fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
@@ -142,9 +145,11 @@ pub fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let top_monitor_name = store
         .get("topSurfaceMonitorName")
         .and_then(|value| value.as_str().map(ToOwned::to_owned));
+    let drawer_anchors = decode_drawer_anchors(store.get("drawerAnchors"));
     if let Ok(mut runtime) = app.state::<ShellState>().runtime.lock() {
         runtime.mode = mode;
         runtime.active_monitor_name = top_monitor_name;
+        runtime.drawer_anchors = drawer_anchors;
     }
     if let Some(path) = store
         .get("recentRepositories")
@@ -266,7 +271,15 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
                 let _ = window.hide();
             }
         }
-        WindowEvent::Moved(_) | WindowEvent::Resized(_) if window.label() == PANEL_LABEL => {
+        WindowEvent::Moved(_) if window.label() == PANEL_LABEL => {
+            let app = window.app_handle();
+            if shell_mode(app) == ShellMode::TopDrawer {
+                let _ = constrain_and_track_drawer_panel(app);
+            } else {
+                let _ = reposition_surfaces_for_panel(app);
+            }
+        }
+        WindowEvent::Resized(_) if window.label() == PANEL_LABEL => {
             let _ = reposition_surfaces_for_panel(window.app_handle());
         }
         WindowEvent::ScaleFactorChanged {
@@ -549,7 +562,7 @@ fn capture_mode_switch_rollback(app: &AppHandle) -> Result<ModeSwitchRollback, S
     let panel = window(app, PANEL_LABEL)?;
     let launcher = window(app, PUCK_LABEL)?;
     let panel_size = panel_logical_inner_size(&panel)?;
-    let (mode, dock_corner, active_monitor_name) = {
+    let (mode, dock_corner, active_monitor_name, drawer_anchors) = {
         let state = app.state::<ShellState>();
         let runtime = state
             .runtime
@@ -559,6 +572,7 @@ fn capture_mode_switch_rollback(app: &AppHandle) -> Result<ModeSwitchRollback, S
             runtime.mode,
             runtime.dock_corner,
             runtime.active_monitor_name.clone(),
+            runtime.drawer_anchors.clone(),
         )
     };
     Ok(ModeSwitchRollback {
@@ -572,6 +586,7 @@ fn capture_mode_switch_rollback(app: &AppHandle) -> Result<ModeSwitchRollback, S
         },
         dock_corner,
         active_monitor_name,
+        drawer_anchors,
     })
 }
 
@@ -629,6 +644,7 @@ fn rollback_shell_mode_change(
             rollback.panel_visible,
             rollback.dock_corner,
             rollback.active_monitor_name.clone(),
+            rollback.drawer_anchors.clone(),
         );
     } else {
         errors.push("could not restore the native state".to_owned());
@@ -762,7 +778,7 @@ fn position_top_panel(app: &AppHandle, mode: ShellMode) -> Result<(), String> {
     };
     let logical_inner = panel_logical_inner_size(&panel)?;
     let estimated_outer = estimated_outer_size(&panel, logical_inner, monitor.scale_factor())?;
-    let provisional = top_center_position(estimated_outer, panel_work_area, 0);
+    let provisional = top_panel_position(app, mode, estimated_outer, panel_work_area, &monitor);
     set_window_position_if_changed(&panel, provisional)?;
     let actual_outer = fit_panel_inner_to_work_area(
         &panel,
@@ -770,7 +786,7 @@ fn position_top_panel(app: &AppHandle, mode: ShellMode) -> Result<(), String> {
         monitor.scale_factor(),
         panel_work_area,
     )?;
-    let final_position = top_center_position(actual_outer, panel_work_area, 0);
+    let final_position = top_panel_position(app, mode, actual_outer, panel_work_area, &monitor);
     set_window_position_if_changed(&panel, final_position)?;
     clear_dock_corner(app);
     Ok(())
@@ -795,8 +811,44 @@ fn reposition_top_panel(app: &AppHandle, mode: ShellMode) -> Result<(), String> 
     let outer = panel.outer_size().map_err(safe_window_error)?;
     set_window_position_if_changed(
         &panel,
-        top_center_position(Size::new(outer.width, outer.height), panel_work_area, 0),
+        top_panel_position(
+            app,
+            mode,
+            Size::new(outer.width, outer.height),
+            panel_work_area,
+            &monitor,
+        ),
     )?;
+    Ok(())
+}
+
+fn top_panel_position(
+    app: &AppHandle,
+    mode: ShellMode,
+    panel: Size,
+    work_area: Rect,
+    monitor: &Monitor,
+) -> Point {
+    if mode == ShellMode::TopDrawer {
+        anchored_top_position(panel, work_area, drawer_anchor_for_monitor(app, monitor))
+    } else {
+        top_center_position(panel, work_area, 0)
+    }
+}
+
+fn constrain_and_track_drawer_panel(app: &AppHandle) -> Result<(), String> {
+    let panel = window(app, PANEL_LABEL)?;
+    let monitor = current_monitor(&panel, app)?;
+    let work_area = monitor_rect(&monitor);
+    let position = panel.outer_position().map_err(safe_window_error)?;
+    let outer = panel.outer_size().map_err(safe_window_error)?;
+    let size = Size::new(outer.width, outer.height);
+    let anchor =
+        horizontal_anchor_for_position(Point::new(position.x, work_area.y), size, work_area);
+    let storage_key = monitor_storage_key_for_monitor(&monitor);
+    set_active_monitor(app, monitor.name().cloned());
+    set_drawer_anchor(app, storage_key, anchor);
+    set_window_position_if_changed(&panel, anchored_top_position(size, work_area, anchor))?;
     Ok(())
 }
 
@@ -808,12 +860,7 @@ fn position_island_launcher(app: &AppHandle) -> Result<Rect, String> {
 
 fn position_island_launcher_on_monitor(app: &AppHandle, monitor: &Monitor) -> Result<Rect, String> {
     let launcher = window(app, PUCK_LABEL)?;
-    let visible_size = LogicalSize::new(ISLAND_LOGICAL_WIDTH, ISLAND_LOGICAL_HEIGHT)
-        .to_physical::<u32>(monitor.scale_factor());
-    let visible_size = Size::new(visible_size.width, visible_size.height);
-    let top_offset = LogicalSize::new(ISLAND_TOP_OFFSET, 0.0)
-        .to_physical::<u32>(monitor.scale_factor())
-        .width;
+    let (visible_size, top_offset) = island_layout_for_scale(monitor.scale_factor());
     let position = top_center_position(visible_size, monitor_rect(monitor), top_offset);
 
     // Move first so Windows applies the target monitor DPI before the final
@@ -833,6 +880,18 @@ fn position_island_launcher_on_monitor(app: &AppHandle, monitor: &Monitor) -> Re
         visible_size.width,
         visible_size.height,
     ))
+}
+
+fn island_layout_for_scale(scale_factor: f64) -> (Size, u32) {
+    let visible_size = LogicalSize::new(ISLAND_LOGICAL_WIDTH, ISLAND_LOGICAL_HEIGHT)
+        .to_physical::<u32>(scale_factor);
+    let top_offset = LogicalSize::new(ISLAND_TOP_OFFSET, 0.0)
+        .to_physical::<u32>(scale_factor)
+        .width;
+    (
+        Size::new(visible_size.width, visible_size.height),
+        top_offset,
+    )
 }
 
 fn estimated_outer_size(
@@ -1085,6 +1144,11 @@ pub(crate) fn save_window_geometry(app: &AppHandle) {
             if let Err(error) = persist_top_monitor_name(app, monitor_name) {
                 eprintln!("RepoPuck could not save the top-surface monitor: {error}");
             }
+            if shell_mode(app) == ShellMode::TopDrawer {
+                if let Err(error) = persist_drawer_anchors(app) {
+                    eprintln!("RepoPuck could not save the drawer positions: {error}");
+                }
+            }
         }
     }
 }
@@ -1273,6 +1337,54 @@ fn persist_top_monitor_name(app: &AppHandle, monitor_name: Option<String>) -> Re
     store.save().map_err(safe_store_error)
 }
 
+fn persist_drawer_anchors(app: &AppHandle) -> Result<(), String> {
+    let anchors = app
+        .state::<ShellState>()
+        .runtime
+        .lock()
+        .map(|runtime| runtime.drawer_anchors.clone())
+        .map_err(|_| "RepoPuck could not read its drawer positions".to_owned())?;
+    let store = app.store(SETTINGS_FILE).map_err(safe_store_error)?;
+    store.set(
+        "drawerAnchors",
+        serde_json::to_value(anchors)
+            .map_err(|_| "Could not save the drawer positions".to_owned())?,
+    );
+    store.save().map_err(safe_store_error)
+}
+
+fn decode_drawer_anchors(value: Option<serde_json::Value>) -> HashMap<String, f64> {
+    value
+        .and_then(|value| serde_json::from_value::<HashMap<String, f64>>(value).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(key, anchor)| !key.trim().is_empty() && anchor.is_finite())
+        .map(|(key, anchor)| (key, normalize_horizontal_anchor(anchor)))
+        .collect()
+}
+
+fn drawer_anchor_for_monitor(app: &AppHandle, monitor: &Monitor) -> f64 {
+    drawer_anchor_for_monitor_key(app, &monitor_storage_key_for_monitor(monitor))
+}
+
+pub(crate) fn drawer_anchor_for_monitor_key(app: &AppHandle, key: &str) -> f64 {
+    app.state::<ShellState>()
+        .runtime
+        .lock()
+        .ok()
+        .and_then(|runtime| runtime.drawer_anchors.get(key).copied())
+        .map(normalize_horizontal_anchor)
+        .unwrap_or(DEFAULT_DRAWER_ANCHOR)
+}
+
+fn set_drawer_anchor(app: &AppHandle, key: String, anchor: f64) {
+    if let Ok(mut runtime) = app.state::<ShellState>().runtime.lock() {
+        runtime
+            .drawer_anchors
+            .insert(key, normalize_horizontal_anchor(anchor));
+    }
+}
+
 pub(crate) fn drawer_is_active(app: &AppHandle) -> bool {
     shell_mode(app) == ShellMode::TopDrawer
         && !app
@@ -1346,6 +1458,30 @@ fn monitor_rect(monitor: &Monitor) -> Rect {
     )
 }
 
+fn monitor_bounds_rect(monitor: &Monitor) -> Rect {
+    let position = monitor.position();
+    let size = monitor.size();
+    Rect::new(position.x, position.y, size.width, size.height)
+}
+
+fn monitor_storage_key_for_monitor(monitor: &Monitor) -> String {
+    monitor_storage_key(
+        monitor.name().map(String::as_str),
+        monitor_bounds_rect(monitor),
+    )
+}
+
+pub(crate) fn monitor_storage_key(name: Option<&str>, bounds: Rect) -> String {
+    name.filter(|name| !name.trim().is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| {
+            format!(
+                "@{},{},{}x{}",
+                bounds.x, bounds.y, bounds.width, bounds.height
+            )
+        })
+}
+
 fn window(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
     app.get_webview_window(label)
         .ok_or_else(|| format!("The {label} window is unavailable"))
@@ -1362,9 +1498,11 @@ fn safe_store_error(_: tauri_plugin_store::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        clamp_panel_size, effective_panel_pinned, panel_size_from_store,
-        puck_content_size_for_scale, PanelTransitionPayload, PersistedPanelSize, ShellMode, Size,
-        TransitionAnimation, TransitionDirection, PANEL_MAX_HEIGHT, PANEL_MAX_WIDTH,
+        clamp_panel_size, decode_drawer_anchors, effective_panel_pinned, island_layout_for_scale,
+        monitor_storage_key, panel_size_from_store, puck_content_size_for_scale,
+        top_center_position, work_area_below_anchor, PanelTransitionPayload, PersistedPanelSize,
+        Point, Rect, ShellMode, Size, TransitionAnimation, TransitionDirection, PANEL_MAX_HEIGHT,
+        PANEL_MAX_WIDTH,
     };
 
     #[test]
@@ -1407,6 +1545,9 @@ mod tests {
             .any(|permission| permission == "core:window:allow-is-visible"));
         assert!(permissions
             .iter()
+            .any(|permission| permission == "core:window:allow-start-dragging"));
+        assert!(permissions
+            .iter()
             .any(|permission| permission == "core:window:allow-start-resize-dragging"));
     }
 
@@ -1428,6 +1569,7 @@ mod tests {
         assert_eq!(panel["maxHeight"], 960);
         assert_eq!(panel["maximizable"], false);
         assert_eq!(panel["minimizable"], false);
+        assert_eq!(panel["shadow"], false);
     }
 
     #[test]
@@ -1444,6 +1586,28 @@ mod tests {
     fn puck_geometry_uses_visible_content_instead_of_the_windows_minimum_frame() {
         assert_eq!(puck_content_size_for_scale(1.0), Size::new(58, 58));
         assert_eq!(puck_content_size_for_scale(1.75), Size::new(102, 102));
+    }
+
+    #[test]
+    fn island_is_flush_with_the_top_and_panel_starts_at_its_bottom_edge() {
+        assert_eq!(island_layout_for_scale(1.0), (Size::new(260, 52), 0));
+        let (island_size, top_offset) = island_layout_for_scale(1.75);
+        assert_eq!(island_size, Size::new(455, 91));
+        assert_eq!(top_offset, 0);
+
+        let work_area = Rect::new(-2_560, 40, 2_560, 1_400);
+        let position = top_center_position(island_size, work_area, top_offset);
+        assert_eq!(position, Point::new(-1_508, 40));
+        let island = Rect::new(
+            position.x,
+            position.y,
+            island_size.width,
+            island_size.height,
+        );
+        assert_eq!(
+            work_area_below_anchor(work_area, island),
+            Rect::new(-2_560, 131, 2_560, 1_309)
+        );
     }
 
     #[test]
@@ -1465,6 +1629,33 @@ mod tests {
             panel_size_from_store(Default::default(), Some(legacy), ShellMode::TopIsland),
             None
         );
+    }
+
+    #[test]
+    fn drawer_anchor_persistence_clamps_values_and_keys_unnamed_monitors() {
+        let restored = decode_drawer_anchors(Some(serde_json::json!({
+            "DISPLAY1": 0.25,
+            "DISPLAY2": 2.0,
+            "DISPLAY3": -1.0,
+            "": 0.75
+        })));
+        assert_eq!(restored.get("DISPLAY1"), Some(&0.25));
+        assert_eq!(restored.get("DISPLAY2"), Some(&1.0));
+        assert_eq!(restored.get("DISPLAY3"), Some(&0.0));
+        assert!(!restored.contains_key(""));
+        assert_eq!(
+            monitor_storage_key(None, Rect::new(-1_920, -40, 1_920, 1_080)),
+            "@-1920,-40,1920x1080"
+        );
+        assert_eq!(
+            monitor_storage_key(Some("\\\\.\\DISPLAY1"), Rect::new(0, 0, 1_920, 1_080)),
+            "\\\\.\\DISPLAY1"
+        );
+
+        let round_trip = decode_drawer_anchors(Some(
+            serde_json::to_value(restored.clone()).expect("drawer anchor map"),
+        ));
+        assert_eq!(round_trip, restored);
     }
 
     #[test]

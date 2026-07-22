@@ -1,4 +1,7 @@
-use std::time::{Duration, Instant};
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -141,6 +144,7 @@ pub struct ShellRuntime {
     pub transition_id: u64,
     pub dock_corner: Option<DockCorner>,
     pub active_monitor_name: Option<String>,
+    pub drawer_anchors: HashMap<String, f64>,
     pub drawer_hover: DrawerHoverTracker,
 }
 
@@ -208,19 +212,24 @@ impl ShellRuntime {
         panel_visible: bool,
         dock_corner: Option<DockCorner>,
         active_monitor_name: Option<String>,
+        drawer_anchors: HashMap<String, f64>,
     ) {
         self.transition_id = self.transition_id.wrapping_add(1);
         self.mode = mode;
         self.phase = stable_panel_phase(panel_visible);
         self.dock_corner = dock_corner;
         self.active_monitor_name = active_monitor_name;
+        self.drawer_anchors = drawer_anchors;
         self.drawer_hover.reset();
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
+    use std::{
+        collections::HashMap,
+        time::{Duration, Instant},
+    };
 
     use super::{
         should_restore_panel_after_mode_change, stable_panel_phase, DrawerHoverTracker,
@@ -316,12 +325,14 @@ mod tests {
             true,
             Some(super::DockCorner::BottomRight),
             Some("DISPLAY1".to_owned()),
+            HashMap::from([("DISPLAY1".to_owned(), 0.25)]),
         );
 
         assert_eq!(runtime.mode, ShellMode::Puck);
         assert_eq!(runtime.phase, PanelPhase::Open);
         assert_eq!(runtime.dock_corner, Some(super::DockCorner::BottomRight));
         assert_eq!(runtime.active_monitor_name.as_deref(), Some("DISPLAY1"));
+        assert_eq!(runtime.drawer_anchors.get("DISPLAY1"), Some(&0.25));
         assert_ne!(runtime.transition_id, changed_transition_id);
         assert_eq!(runtime.complete_transition(opening.transition_id), None);
     }
