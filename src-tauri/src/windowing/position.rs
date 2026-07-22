@@ -1,4 +1,30 @@
-const PANEL_GAP: i64 = 12;
+const PUCK_OVERLAP: i64 = 10;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DockCorner {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl DockCorner {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TopLeft => "top-left",
+            Self::TopRight => "top-right",
+            Self::BottomLeft => "bottom-left",
+            Self::BottomRight => "bottom-right",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PanelPlacement {
+    pub position: Point,
+    /// The panel corner touched by the puck. This is also the animation origin.
+    pub corner: DockCorner,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Point {
@@ -53,27 +79,172 @@ impl Rect {
     }
 }
 
-pub fn panel_position(puck: Rect, panel: Size, work_area: Rect) -> Point {
+/// Returns the total non-client width and height around a window's client area.
+pub fn window_frame_size(outer: Size, inner: Size) -> Size {
+    Size::new(
+        outer.width.saturating_sub(inner.width),
+        outer.height.saturating_sub(inner.height),
+    )
+}
+
+/// Fits a desired client size into a work area while reserving the native frame.
+pub fn fit_window_inner_size(desired: Size, frame: Size, work_area: Size) -> Size {
+    Size::new(
+        desired
+            .width
+            .min(work_area.width.saturating_sub(frame.width)),
+        desired
+            .height
+            .min(work_area.height.saturating_sub(frame.height)),
+    )
+}
+
+/// Clamps an existing outer window rectangle into a monitor work area.
+pub fn clamp_window_position(window: Rect, work_area: Rect) -> Point {
     let work_left = i64::from(work_area.x);
     let work_top = i64::from(work_area.y);
     let work_right = work_left + i64::from(work_area.width);
     let work_bottom = work_top + i64::from(work_area.height);
+    let max_x = work_right.saturating_sub(i64::from(window.width));
+    let max_y = work_bottom.saturating_sub(i64::from(window.height));
+
+    Point::new(
+        to_i32(clamp(i64::from(window.x), work_left, max_x)),
+        to_i32(clamp(i64::from(window.y), work_top, max_y)),
+    )
+}
+
+#[derive(Clone, Copy)]
+struct Candidate {
+    position: Point,
+    corner: DockCorner,
+    available_width: i64,
+    available_height: i64,
+}
+
+impl Candidate {
+    fn fits(self, panel: Size) -> bool {
+        self.available_width >= i64::from(panel.width)
+            && self.available_height >= i64::from(panel.height)
+    }
+
+    fn area(self) -> i128 {
+        i128::from(self.available_width.max(0)) * i128::from(self.available_height.max(0))
+    }
+}
+
+/// Chooses the largest quadrant around the puck that can fully contain the panel.
+///
+/// `DockCorner` names the panel corner touched by the puck. For example, a panel
+/// placed below and to the right of the puck has a `TopLeft` dock corner.
+pub fn panel_placement(puck: Rect, panel: Size, work_area: Rect) -> PanelPlacement {
+    let work_left = i64::from(work_area.x);
+    let work_top = i64::from(work_area.y);
+    let work_right = work_left + i64::from(work_area.width);
+    let work_bottom = work_top + i64::from(work_area.height);
+    let puck_left = i64::from(puck.x);
+    let puck_top = i64::from(puck.y);
+    let puck_right = puck_left + i64::from(puck.width);
+    let puck_bottom = puck_top + i64::from(puck.height);
     let panel_width = i64::from(panel.width);
     let panel_height = i64::from(panel.height);
-    let right_candidate = i64::from(puck.x) + i64::from(puck.width) + PANEL_GAP;
-    let left_candidate = i64::from(puck.x) - PANEL_GAP - panel_width;
 
-    let x = if right_candidate + panel_width <= work_right {
-        right_candidate
-    } else if left_candidate >= work_left {
-        left_candidate
-    } else {
-        clamp(i64::from(puck.x), work_left, work_right - panel_width)
+    let left_width = puck_left + PUCK_OVERLAP - work_left;
+    let right_width = work_right - (puck_right - PUCK_OVERLAP);
+    let top_height = puck_top + PUCK_OVERLAP - work_top;
+    let bottom_height = work_bottom - (puck_bottom - PUCK_OVERLAP);
+
+    // Stable ordering is intentional: equal inputs always choose the same corner.
+    let candidates = [
+        Candidate {
+            position: Point::new(
+                to_i32(puck_right - PUCK_OVERLAP),
+                to_i32(puck_bottom - PUCK_OVERLAP),
+            ),
+            corner: DockCorner::TopLeft,
+            available_width: right_width,
+            available_height: bottom_height,
+        },
+        Candidate {
+            position: Point::new(
+                to_i32(puck_left + PUCK_OVERLAP - panel_width),
+                to_i32(puck_bottom - PUCK_OVERLAP),
+            ),
+            corner: DockCorner::TopRight,
+            available_width: left_width,
+            available_height: bottom_height,
+        },
+        Candidate {
+            position: Point::new(
+                to_i32(puck_right - PUCK_OVERLAP),
+                to_i32(puck_top + PUCK_OVERLAP - panel_height),
+            ),
+            corner: DockCorner::BottomLeft,
+            available_width: right_width,
+            available_height: top_height,
+        },
+        Candidate {
+            position: Point::new(
+                to_i32(puck_left + PUCK_OVERLAP - panel_width),
+                to_i32(puck_top + PUCK_OVERLAP - panel_height),
+            ),
+            corner: DockCorner::BottomRight,
+            available_width: left_width,
+            available_height: top_height,
+        },
+    ];
+
+    let any_fit = candidates.iter().any(|candidate| candidate.fits(panel));
+    let chosen = candidates
+        .into_iter()
+        .filter(|candidate| !any_fit || candidate.fits(panel))
+        .max_by_key(|candidate| candidate.area())
+        .expect("the four dock candidates are always present");
+    let max_x = work_right.saturating_sub(panel_width);
+    let max_y = work_bottom.saturating_sub(panel_height);
+    let position = Point::new(
+        to_i32(clamp(i64::from(chosen.position.x), work_left, max_x)),
+        to_i32(clamp(i64::from(chosen.position.y), work_top, max_y)),
+    );
+
+    PanelPlacement {
+        position,
+        corner: chosen.corner,
+    }
+}
+
+/// Keeps the puck attached just outside the selected panel corner.
+pub fn puck_position(panel: Rect, puck: Size, corner: DockCorner, work_area: Rect) -> Point {
+    let panel_left = i64::from(panel.x);
+    let panel_top = i64::from(panel.y);
+    let panel_right = panel_left + i64::from(panel.width);
+    let panel_bottom = panel_top + i64::from(panel.height);
+    let puck_width = i64::from(puck.width);
+    let puck_height = i64::from(puck.height);
+    let (x, y) = match corner {
+        DockCorner::TopLeft => (
+            panel_left - puck_width + PUCK_OVERLAP,
+            panel_top - puck_height + PUCK_OVERLAP,
+        ),
+        DockCorner::TopRight => (
+            panel_right - PUCK_OVERLAP,
+            panel_top - puck_height + PUCK_OVERLAP,
+        ),
+        DockCorner::BottomLeft => (
+            panel_left - puck_width + PUCK_OVERLAP,
+            panel_bottom - PUCK_OVERLAP,
+        ),
+        DockCorner::BottomRight => (panel_right - PUCK_OVERLAP, panel_bottom - PUCK_OVERLAP),
     };
-    let centered_y = i64::from(puck.y) + (i64::from(puck.height) - panel_height) / 2;
-    let y = clamp(centered_y, work_top, work_bottom - panel_height);
+    let work_left = i64::from(work_area.x);
+    let work_top = i64::from(work_area.y);
+    let work_right = work_left + i64::from(work_area.width);
+    let work_bottom = work_top + i64::from(work_area.height);
 
-    Point::new(to_i32(x), to_i32(y))
+    Point::new(
+        to_i32(clamp(x, work_left, work_right - puck_width)),
+        to_i32(clamp(y, work_top, work_bottom - puck_height)),
+    )
 }
 
 pub fn restore_relative_position(relative: Point, puck: Size, work_area: Rect) -> Point {
@@ -94,48 +265,82 @@ fn to_i32(value: i64) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{panel_position, restore_relative_position, Point, Rect, Size};
+    use super::{
+        clamp_window_position, fit_window_inner_size, panel_placement, puck_position,
+        restore_relative_position, window_frame_size, DockCorner, Point, Rect, Size,
+    };
 
     const PANEL: Size = Size::new(420, 720);
     const PUCK: Size = Size::new(58, 58);
     const WORK_AREA: Rect = Rect::new(0, 0, 1_920, 1_040);
 
     #[test]
-    fn places_the_panel_to_the_right_when_space_is_available() {
-        let puck = Rect::new(12, 420, PUCK.width, PUCK.height);
+    fn selects_each_panel_corner_from_the_puck_quadrant() {
+        let cases = [
+            (Rect::new(10, 10, 58, 58), DockCorner::TopLeft),
+            (Rect::new(1_850, 10, 58, 58), DockCorner::TopRight),
+            (Rect::new(10, 970, 58, 58), DockCorner::BottomLeft),
+            (Rect::new(1_850, 970, 58, 58), DockCorner::BottomRight),
+        ];
 
-        assert_eq!(panel_position(puck, PANEL, WORK_AREA), Point::new(82, 89));
+        for (puck, expected) in cases {
+            let placement = panel_placement(puck, PANEL, WORK_AREA);
+            assert_eq!(placement.corner, expected);
+            assert!(placement.position.x >= WORK_AREA.x);
+            assert!(placement.position.y >= WORK_AREA.y);
+            assert!(placement.position.x + PANEL.width as i32 <= WORK_AREA.right());
+            assert!(placement.position.y + PANEL.height as i32 <= WORK_AREA.bottom());
+        }
     }
 
     #[test]
-    fn places_the_panel_to_the_left_near_the_right_edge() {
-        let puck = Rect::new(1_850, 420, PUCK.width, PUCK.height);
+    fn repeated_placement_is_stable() {
+        let puck = Rect::new(1_850, 970, PUCK.width, PUCK.height);
 
         assert_eq!(
-            panel_position(puck, PANEL, WORK_AREA),
-            Point::new(1_418, 89)
+            panel_placement(puck, PANEL, WORK_AREA),
+            panel_placement(puck, PANEL, WORK_AREA)
         );
     }
 
     #[test]
-    fn clamps_the_panel_inside_top_and_bottom_work_area_edges() {
-        let top_puck = Rect::new(100, 0, PUCK.width, PUCK.height);
-        let bottom_puck = Rect::new(100, 1_000, PUCK.width, PUCK.height);
+    fn clamps_near_edges_when_no_quadrant_fully_fits() {
+        let work_area = Rect::new(0, 0, 800, 700);
+        let panel = Size::new(720, 640);
+        let placement = panel_placement(Rect::new(371, 321, 58, 58), panel, work_area);
 
-        assert_eq!(panel_position(top_puck, PANEL, WORK_AREA).y, 0);
-        assert_eq!(panel_position(bottom_puck, PANEL, WORK_AREA).y, 320);
+        assert!(placement.position.x >= work_area.x);
+        assert!(placement.position.y >= work_area.y);
+        assert!(placement.position.x + panel.width as i32 <= work_area.right());
+        assert!(placement.position.y + panel.height as i32 <= work_area.bottom());
     }
 
     #[test]
     fn respects_negative_multi_monitor_coordinates() {
         let work_area = Rect::new(-1_920, -40, 1_920, 1_040);
-        let puck = Rect::new(-1_910, 300, PUCK.width, PUCK.height);
-        let position = panel_position(puck, PANEL, work_area);
+        let puck = Rect::new(-70, 900, PUCK.width, PUCK.height);
+        let placement = panel_placement(puck, PANEL, work_area);
 
-        assert_eq!(position.x, -1_840);
-        assert!(position.y >= work_area.y);
-        assert!(position.x + PANEL.width as i32 <= work_area.right());
-        assert!(position.y + PANEL.height as i32 <= work_area.bottom());
+        assert_eq!(placement.corner, DockCorner::BottomRight);
+        assert!(placement.position.x >= work_area.x);
+        assert!(placement.position.y >= work_area.y);
+        assert!(placement.position.x + PANEL.width as i32 <= work_area.right());
+        assert!(placement.position.y + PANEL.height as i32 <= work_area.bottom());
+    }
+
+    #[test]
+    fn reattaches_the_puck_to_all_four_panel_corners() {
+        let panel = Rect::new(500, 200, PANEL.width, PANEL.height);
+        let cases = [
+            (DockCorner::TopLeft, Point::new(452, 152)),
+            (DockCorner::TopRight, Point::new(910, 152)),
+            (DockCorner::BottomLeft, Point::new(452, 910)),
+            (DockCorner::BottomRight, Point::new(910, 910)),
+        ];
+
+        for (corner, expected) in cases {
+            assert_eq!(puck_position(panel, PUCK, corner, WORK_AREA), expected);
+        }
     }
 
     #[test]
@@ -149,6 +354,31 @@ mod tests {
         assert_eq!(
             restore_relative_position(Point::new(-50, -25), PUCK, work_area),
             Point::new(-1_920, 20)
+        );
+    }
+
+    #[test]
+    fn fits_client_size_without_counting_the_native_frame_as_content() {
+        let frame = window_frame_size(Size::new(752, 992), Size::new(736, 976));
+
+        assert_eq!(frame, Size::new(16, 16));
+        assert_eq!(
+            fit_window_inner_size(Size::new(1_260, 1_680), frame, Size::new(1_920, 1_040),),
+            Size::new(1_260, 1_024),
+        );
+    }
+
+    #[test]
+    fn clamps_an_outer_window_on_negative_monitor_coordinates() {
+        let work_area = Rect::new(-1_920, -40, 1_920, 1_040);
+
+        assert_eq!(
+            clamp_window_position(Rect::new(-100, 900, 720, 960), work_area),
+            Point::new(-720, 40),
+        );
+        assert_eq!(
+            clamp_window_position(Rect::new(-2_200, -200, 420, 720), work_area),
+            Point::new(-1_920, -40),
         );
     }
 }
