@@ -17,30 +17,43 @@
   <img alt="React" src="https://img.shields.io/badge/React-19-149eca?style=flat-square&logo=react&logoColor=white">
 </p>
 
-> 中文简介：RepoPuck 是一个常驻桌面的轻量 Git 助手，让你无需切回 IDE 就能选择文件、切换分支、提交并推送。🚀
+> 中文简介：RepoPuck 是一个常驻桌面的轻量 Git 助手，让你无需切回 IDE，就能选择文件、切换分支、提交并推送。🚀
 
 RepoPuck stays close without becoming a full Git client. Open a repository, review tracked and unversioned changes separately, stage only the files that belong together, then choose **Commit** or **Commit & Push**.
+
+## 🚦 Project status
+
+| Channel | Version | Source | Status |
+| --- | --- | --- | --- |
+| ✅ **Stable** | `v0.1.2` | [`v0.1.2` tag](https://github.com/YYchainsAw/RepoPuck/releases/tag/v0.1.2) | Released and recommended for normal use. Includes the floating puck workflow. |
+| 🧪 **Preview** | `v0.2.0` | [`develop` branch](https://github.com/YYchainsAw/RepoPuck/tree/develop) | Three shell modes are implemented and local packaged-app QA is complete for candidate `d256959`. It has not been published. |
+
+> [!IMPORTANT]
+> The latest stable MSI is still `v0.1.2`. Candidate `d256959` completed local `v0.2.0` preview QA on Windows 11 with one display at 175% scaling, but GitHub Actions had not run when evidence was captured. A single `develop` push and its successful CI jobs remain the post-QA gate before publishing; no 100%, mixed-DPI, or negative-coordinate hardware run is claimed.
 
 ## ✨ Why RepoPuck?
 
 - ⚡ **Fast everyday flow** — stage, commit, push, fetch, pull, stash, and switch branches from a compact panel.
 - 🎯 **Focused by design** — common Git actions stay prominent; advanced actions live in the More menu.
 - 🖥️ **Desktop-native behavior** — tray integration, always-on-top launchers, multi-monitor placement, DPI awareness, and restored geometry.
-- 🧩 **Three ways to stay nearby** — use a draggable puck, a top island, or an auto-revealing top drawer.
+- 🧩 **Three ways to stay nearby** — the stable puck is joined on `develop` by a top island and an auto-revealing top drawer.
 - 🌗 **GitHub-inspired UI** — Primer components and tokens in light, dark, or system theme.
 - 🔐 **No GitHub account required** — RepoPuck reuses your existing Git, Git Credential Manager, or SSH setup.
 
 ## 🧭 Three shell modes
 
-Choose a mode from **More → Settings → Launch mode**. The full Git workspace is shared across all three, so switching modes never changes your repository or staged files.
+The three-mode selector is currently available in the `v0.2.0` preview on `develop`. Choose a mode from **More → Settings → Launch mode**. The full Git workspace is shared across all three, so switching modes does not change the selected repository or staged files.
 
-| Mode | How it behaves | Best for |
-| --- | --- | --- |
-| 🟢 **Floating puck** | A draggable 58 × 58 desktop puck. Click once to open the panel and again to close it. The puck attaches to the best panel corner. | A visible, movable Git shortcut |
-| ⬛ **Top island** | A compact GitHub-style capsule stays centered at the top of the active display. Click it to drop the panel directly underneath. | A stable launcher that never covers the sides of the screen |
-| 📜 **Top drawer** | The launcher disappears. Move the pointer to the top-center hot zone and pause briefly; the panel rolls down and hides after the pointer leaves. | A nearly invisible workspace with maximum desktop space |
+| Mode | Availability | How it behaves | Best for |
+| --- | --- | --- | --- |
+| 🟢 **Floating puck** | Stable in `v0.1.2` | A draggable 58 × 58 desktop puck. Click once to open the panel and again to close it. The puck attaches to the best panel corner. | A visible, movable Git shortcut |
+| 🏝️ **Top island** | Preview in `v0.2.0` | A 260 × 52 launcher window sits flush with the selected display's work-area top. Its 260 × 48 surface has a flat top edge, rounded lower corners, and a 4 px shadow area. Click it to drop the panel directly underneath. | A fixed launcher that avoids the sides of the screen |
+| 📜 **Top drawer** | Preview in `v0.2.0` | The launcher disappears. Reveal the panel from its top-edge hot zone, then drag its handle left or right along the display top. Its vertical position stays locked. | A nearly invisible workspace with a remembered reveal position |
 
-The drawer uses a native cursor hot zone instead of a transparent WebView strip, so the hidden mode does not block clicks near the top of the desktop. Keyboard and tray access remain available as a fallback.
+The drawer uses a native cursor hot zone instead of a transparent WebView strip, so the hidden mode does not block clicks near the top of the desktop. Its horizontal position is saved as a normalized anchor for each display, and the hidden hot zone follows that anchor. For keyboard-only access, press **Win+B**, select RepoPuck in the system tray, and choose **Open panel**.
+
+> [!TIP]
+> **Keyboard path for Top Drawer:** RepoPuck does not register a global shortcut yet. Press **Win+B** to focus the Windows notification area, use the arrow keys to reach **RepoPuck**, press **Shift+F10** (or the Menu key), select **Open panel**, and press **Enter**. This tray command opens the same shared panel without requiring pointer access to the top-edge hot zone.
 
 ## 🖼️ Interface
 
@@ -54,7 +67,15 @@ The v0.1.2 icon direction combines the RepoPuck name with a docked three-node Gi
 
 ![RepoPuck icon reference, packaged asset, and live Windows rendering](docs/qa/repopuck-v012-icon-reference-vs-actual.png)
 
-Visual comparisons, responsive evidence, and interaction-state checks live in [design-qa.md](design-qa.md).
+The images above document the released `v0.1.2` panel. The completed local `v0.2.0` shell-mode evidence, candidate hashes, measurements, and hardware limits live in [docs/design-qa.md](docs/design-qa.md).
+
+### 🧪 `v0.2.0` preview surfaces
+
+| 🏝️ Attached top island | ↔️ Movable top drawer |
+| --- | --- |
+| <img alt="RepoPuck attached top island and panel" src="docs/qa/v020/island-attached-composite.png" width="360"> | <img alt="RepoPuck top drawer at its saved right-side anchor" src="docs/qa/v020/drawer-open-right.png" width="360"> |
+
+These are packaged-app captures from the local candidate, not images from the stable `v0.1.2` installer.
 
 ## ✅ Git workflow
 
@@ -72,6 +93,8 @@ Visual comparisons, responsive evidence, and interaction-state checks live in [d
 Merge, rebase, cherry-pick, destructive reset, conflict editing, remote management, and force-push remain intentionally outside the focused workflow.
 
 ## 📦 Install the stable release
+
+These instructions install `v0.1.2`, the current stable floating-puck release. The island and drawer modes are not part of this installer.
 
 1. Download the MSI from the [latest GitHub Release](https://github.com/YYchainsAw/RepoPuck/releases/latest).
 2. Run the installer.
@@ -91,14 +114,14 @@ RepoPuck targets Windows 10 and Windows 11 and requires:
 
 | Layer | Technology | Role |
 | --- | --- | --- |
-| Desktop shell | **Tauri 2** | Native windows, system tray, IPC, packaging, and application lifecycle |
+| Desktop shell | **Tauri 2 + WebView2** | Native windows, system tray, IPC, packaging, and hardware-accelerated Windows rendering |
 | Native core | **Rust 2021** | Git orchestration, input validation, window geometry, persistence, and process safety |
-| UI | **React 19 + TypeScript 5.8** | Panel, launchers, settings, transitions, and typed client boundaries |
+| UI | **React 19.2 + TypeScript 5.8** | Shared panel, launchers, settings, transitions, and typed client boundaries |
 | Design system | **GitHub Primer React + Octicons** | Accessible controls, icons, themes, and GitHub-style visual language |
-| Build tooling | **Vite 6 + pnpm 10** | Fast development, locked dependencies, and production frontend builds |
-| Testing | **Vitest + Testing Library + Rust tests** | UI behavior, parser, Git service, geometry, and state-machine coverage |
+| Build tooling | **Vite 6.4 + pnpm 10** | Fast development, locked dependencies, and production frontend builds |
+| Testing | **Vitest 3 + Testing Library + Rust tests** | UI behavior, Git services, geometry, state-machine transitions, and accessibility contracts |
 | Git engine | **System Git CLI** | Repository status and local/remote Git operations |
-| Windows runtime | **WebView2 + Windows APIs** | Hardware-accelerated rendering, job objects, no-console processes, and cursor hot zones |
+| Windows integration | **Windows APIs** | Job Objects, hidden console processes, DPI-aware monitor geometry, and drawer cursor hot zones |
 | Automation | **GitHub Actions** | Frontend checks, Rust checks, and verified Windows MSI builds |
 
 ## 🏗️ Architecture
@@ -106,7 +129,7 @@ RepoPuck targets Windows 10 and Windows 11 and requires:
 ```mermaid
 flowchart TD
     L["Launcher WebView<br>Puck / Island"] -->|toggle & mode events| W["Rust window state"]
-    H["Native top hot zone<br>Drawer mode"] --> W
+    H["Native anchored hot zone<br>Drawer mode"] --> W
     W --> P["Shared panel WebView<br>React + Primer"]
     P --> C["Typed Tauri commands"]
     C --> G["Rust Git service"]
@@ -119,6 +142,7 @@ Two WebViews are reused across all modes:
 
 - The lightweight launcher WebView renders the puck or top island. It is hidden in drawer mode.
 - The panel WebView renders the only full Git workspace and changes only its placement and transition.
+- Both top modes keep the panel attached to the work-area top and therefore disable north-facing resize handles; drawer mode adds horizontal native dragging with a locked vertical coordinate.
 
 Blocking Git work runs outside the WebView command thread. Commands disable terminal prompting, hide console windows, bound captured output, and place each process tree in a Windows Job Object so timeouts stop helper and transport processes as well.
 
@@ -135,9 +159,11 @@ Remote commands delegate authentication to your existing Git configuration:
 
 If `git push` works in a terminal for the selected repository, RepoPuck uses the same credential path. If it does not, complete authentication once in a terminal and retry.
 
-Only non-secret preferences are persisted: theme, pin state, shell mode, panel size, launcher geometry, selected display, and a bounded recent-repository list.
+Only non-secret preferences are persisted: theme, pin state, shell mode, panel size, launcher geometry, selected display, per-display normalized drawer anchors, and a bounded recent-repository list.
 
 ## 👩‍💻 Development
+
+The `develop` branch currently carries version `0.2.0`. Use tag `v0.1.2` when reproducing the stable release instead.
 
 ### Prerequisites
 
@@ -180,7 +206,7 @@ cargo test --locked
 Pop-Location
 ```
 
-GitHub Actions runs the same frontend and Rust checks and produces a verified Windows MSI artifact.
+GitHub Actions runs the same frontend and Rust checks and produces a verified Windows MSI artifact. For candidate `d256959`, the local gates are complete; the workflow is intentionally deferred until the changes are collected into one `develop` push.
 
 ### Package a release build
 
@@ -196,8 +222,12 @@ Do not distribute a local installer until automated checks, visual QA, runtime s
 - [x] 📐 Resizable panel with restored geometry
 - [x] 🌗 Light, dark, and system themes
 - [x] 📦 Signed-off CI pipeline and GitHub Release workflow
-- [x] ⬛ Top island mode
-- [x] 📜 Auto-revealing top drawer mode
+- [x] 🏝️ Top island implementation on `develop`
+- [x] 📜 Auto-revealing top drawer implementation on `develop`
+- [x] ↔️ Per-display draggable drawer anchor and following hot zone on `develop`
+- [x] 🧪 Complete local `v0.2.0` packaged-app QA at 175% scaling
+- [ ] ✅ Run the post-QA GitHub Actions gate from one `develop` push
+- [ ] 📦 Publish the validated `v0.2.0` Release
 - [ ] 🔏 Windows code signing
 - [ ] ⌨️ Configurable global keyboard shortcut
 - [ ] 🔔 Optional push/fetch notifications
