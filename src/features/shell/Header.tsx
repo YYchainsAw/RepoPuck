@@ -110,9 +110,11 @@ export function Header({
           disabled={busy}
           onClick={onCreateBranch}
         />
-        <span className="branch-sync" title="Remote divergence">
-          Ahead {snapshot.ahead}, behind {snapshot.behind}
-        </span>
+        {(snapshot.ahead > 0 || snapshot.behind > 0) && (
+          <span className="branch-sync" title="Remote divergence">
+            Ahead {snapshot.ahead}, behind {snapshot.behind}
+          </span>
+        )}
         <IconButton
           icon={busy ? Spinner : SyncIcon}
           unsafeDisableTooltip

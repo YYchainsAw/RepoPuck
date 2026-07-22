@@ -378,4 +378,14 @@ describe("PanelShell", () => {
     const divergence = screen.getByText("Ahead 1, behind 2");
     expect(divergence).not.toHaveTextContent(/[↑↓]/);
   });
+
+  it("omits no-op remote divergence so the branch keeps compact-row space", () => {
+    workspace.current = createWorkspace({
+      snapshot: { ...snapshot, ahead: 0, behind: 0 },
+    });
+    render(<PanelShell />);
+
+    expect(screen.queryByTitle("Remote divergence")).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Branch" })).toHaveValue("main");
+  });
 });
