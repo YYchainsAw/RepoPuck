@@ -75,7 +75,8 @@ No actionable P0, P1, or P2 differences remain.
 - The puck window is focusable without taking initial focus. Visible focus treatment, accessible names, live status/alert roles, 44 px controls, and menu separator semantics are covered.
 - Clean, dark, error, success, menu, Amend, default, and minimum-size states were inspected.
 - Every final CDP capture reported no runtime exception or log event. The production WebView rendered successfully with the restrictive CSP enabled.
-- Automated gates at this pass: 11 frontend files / 89 tests, 39 Rust tests, TypeScript type-check, ESLint, Rustfmt, Clippy with warnings denied, frontend production build, and Debug MSI packaging all passed.
+- The final release ran through multiple automatic refresh cycles while a 10 ms Win32 scan detected zero visible `ConsoleWindowClass` windows.
+- Automated gates at this pass: 11 frontend files / 91 tests, 43 Rust tests, TypeScript type-check, ESLint, Rustfmt, Clippy with warnings denied, frontend production build, and debug/release MSI packaging all passed.
 
 ## Open questions
 

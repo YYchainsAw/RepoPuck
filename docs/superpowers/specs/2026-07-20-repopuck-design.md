@@ -85,4 +85,3 @@ Local settings contain only theme, pin state, puck position, selected repository
 - Git is required on the user's PATH; a clear installation error is shown when it is missing.
 - GitHub account login is intentionally absent from v0.1.
 - The repository is developed on `develop` with small, coherent commits and infrequent pushes.
-
