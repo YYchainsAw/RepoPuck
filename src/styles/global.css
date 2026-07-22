@@ -38,10 +38,10 @@ html[data-window-view="puck"]:not([data-shell-mode]) #root {
 html[data-window-view="puck"][data-shell-mode="top-island"],
 html[data-window-view="puck"][data-shell-mode="top-island"] body,
 html[data-window-view="puck"][data-shell-mode="top-island"] #root {
-  height: 48px;
-  min-height: 48px;
-  min-width: 240px;
-  width: 240px;
+  height: 52px;
+  min-height: 52px;
+  min-width: 260px;
+  width: 260px;
 }
 
 html[data-window-view="puck"][data-shell-mode="top-drawer"],
@@ -218,29 +218,25 @@ html[data-window-view="puck"][data-shell-mode="top-drawer"] #root {
 
 @keyframes panel-drawer-open {
   from {
-    clip-path: inset(0 0 100% 0 round 0 0 var(--panel-radius) var(--panel-radius));
     opacity: 0;
-    transform: translateY(-16px);
+    transform: translateY(-12px) scaleY(0.97);
   }
 
   to {
-    clip-path: inset(0 0 0 0 round 0 0 var(--panel-radius) var(--panel-radius));
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(0) scaleY(1);
   }
 }
 
 @keyframes panel-drawer-close {
   from {
-    clip-path: inset(0 0 0 0 round 0 0 var(--panel-radius) var(--panel-radius));
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(0) scaleY(1);
   }
 
   to {
-    clip-path: inset(0 0 100% 0 round 0 0 var(--panel-radius) var(--panel-radius));
     opacity: 0;
-    transform: translateY(-16px);
+    transform: translateY(-12px) scaleY(0.97);
   }
 }
 

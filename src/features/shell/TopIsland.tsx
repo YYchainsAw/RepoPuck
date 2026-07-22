@@ -44,7 +44,12 @@ export function TopIsland({
   };
 
   return (
-    <main className="top-island-surface" aria-label="RepoPuck top island">
+    <main
+      className="top-island-surface"
+      aria-label="RepoPuck top island"
+      data-expanded={expanded}
+      data-placement="top-edge"
+    >
       <button
         className="top-island-button"
         type="button"

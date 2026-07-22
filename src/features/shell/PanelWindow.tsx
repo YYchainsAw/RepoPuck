@@ -68,6 +68,9 @@ export function PanelWindow() {
 
   const transition = nativeShell.transition;
   const mode = transition?.mode ?? nativeShell.state.mode;
+  const closing =
+    transition?.direction === "close" ||
+    nativeShell.state.panelPhase === "closing";
   const anchor =
     transition?.anchor ??
     nativeShell.state.dockCorner ??
@@ -215,13 +218,15 @@ export function PanelWindow() {
             <PanelShell />
           </Suspense>
         </div>
-        <PanelResizeHandles
-          disabledDirections={
-            mode === "puck"
-              ? undefined
-              : ["North", "NorthEast", "NorthWest"]
-          }
-        />
+        {!closing && (
+          <PanelResizeHandles
+            disabledDirections={
+              mode === "puck"
+                ? undefined
+                : ["North", "NorthEast", "NorthWest"]
+            }
+          />
+        )}
       </div>
     </GitProvider>
   );

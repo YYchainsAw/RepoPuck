@@ -5,6 +5,7 @@ import { CommitComposer } from "../git/CommitComposer";
 import { RepositoryEmptyState } from "../git/RepositoryEmptyState";
 import { useGitWorkspace } from "../git/useGitWorkspace";
 import { ActionMenu } from "./ActionMenu";
+import { DrawerDragHandle } from "./DrawerDragHandle";
 import { Header } from "./Header";
 import { createNativeShellClient } from "./nativeClient";
 import { Notice } from "./Notice";
@@ -129,6 +130,10 @@ export function PanelShell() {
           data-min-width="360"
           data-min-height="560"
         >
+          <DrawerDragHandle
+            mode={nativeShell.state.mode}
+            closing={nativeShell.state.panelPhase === "closing"}
+          />
           {workspace.snapshot ? (
             <>
               <div className="panel-top">
