@@ -15,8 +15,8 @@ use tauri::{
 use tauri_plugin_store::StoreExt;
 
 use self::position::{
-    clamp_window_position, fit_window_inner_size, panel_placement, puck_position,
-    restore_relative_position, window_frame_size, DockCorner, Point, Rect, Size,
+    clamp_window_position, dock_safe_panel_work_area, fit_window_inner_size, panel_placement,
+    puck_position, restore_relative_position, window_frame_size, DockCorner, Point, Rect, Size,
 };
 
 const PANEL_LABEL: &str = "panel";
@@ -251,10 +251,25 @@ fn position_panel(app: &AppHandle) -> Result<DockCorner, String> {
     // Moving a hidden window between monitors may change its DPI and native
     // frame. Size it in the target monitor's physical pixels, then measure the
     // real outer bounds before choosing the final placement.
-    let actual_outer =
-        fit_panel_inner_to_work_area(&panel, logical_inner, monitor.scale_factor(), work_area)?;
+    let provisional_work_area = dock_safe_panel_work_area(work_area, puck_size, provisional.corner);
+    let actual_outer = fit_panel_inner_to_work_area(
+        &panel,
+        logical_inner,
+        monitor.scale_factor(),
+        provisional_work_area,
+    )?;
     let placement = panel_placement(puck_rect, actual_outer, work_area);
-    set_window_position_if_changed(&panel, placement.position)?;
+    let final_work_area = dock_safe_panel_work_area(work_area, puck_size, placement.corner);
+    let final_position = clamp_window_position(
+        Rect::new(
+            placement.position.x,
+            placement.position.y,
+            actual_outer.width,
+            actual_outer.height,
+        ),
+        final_work_area,
+    );
+    set_window_position_if_changed(&panel, final_position)?;
     set_dock_corner(app, placement.corner);
     Ok(placement.corner)
 }
@@ -321,13 +336,17 @@ fn reflow_panel_after_scale_change(
     }
     let monitor = current_monitor(&panel, app)?;
     let work_area = monitor_rect(&monitor);
+    let puck = window(app, PUCK_LABEL)?;
+    let puck_size = puck_content_size(&puck)?;
+    let corner = current_dock_corner(app).unwrap_or(DockCorner::TopLeft);
+    let panel_work_area = dock_safe_panel_work_area(work_area, puck_size, corner);
     let raw_logical = new_inner_size.to_logical::<f64>(scale_factor);
     let (width, height) = clamp_panel_size(raw_logical.width, raw_logical.height);
     let actual_outer = fit_panel_inner_to_work_area(
         &panel,
         LogicalSize::new(width, height),
         scale_factor,
-        work_area,
+        panel_work_area,
     )?;
     let current = panel.outer_position().map_err(safe_window_error)?;
     let clamped = clamp_window_position(
@@ -337,7 +356,7 @@ fn reflow_panel_after_scale_change(
             actual_outer.width,
             actual_outer.height,
         ),
-        work_area,
+        panel_work_area,
     );
     set_window_position_if_changed(&panel, clamped)?;
     reposition_puck_for_panel(app)
@@ -357,6 +376,7 @@ fn reposition_puck_for_panel(app: &AppHandle) -> Result<(), String> {
     let puck_size = puck_content_size(&puck)?;
     let monitor = current_monitor(&panel, app)?;
     let work_area = monitor_rect(&monitor);
+    let panel_work_area = dock_safe_panel_work_area(work_area, puck_size, corner);
     let clamped_panel_position = clamp_window_position(
         Rect::new(
             panel_position.x,
@@ -364,7 +384,7 @@ fn reposition_puck_for_panel(app: &AppHandle) -> Result<(), String> {
             panel_size.width,
             panel_size.height,
         ),
-        work_area,
+        panel_work_area,
     );
     if set_window_position_if_changed(&panel, clamped_panel_position)? {
         panel_position = PhysicalPosition::new(clamped_panel_position.x, clamped_panel_position.y);

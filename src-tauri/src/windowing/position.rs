@@ -114,6 +114,34 @@ pub fn clamp_window_position(window: Rect, work_area: Rect) -> Point {
     )
 }
 
+/// Reserves enough work-area space for the visible puck to sit outside a panel
+/// corner while preserving the configured overlap.
+pub fn dock_safe_panel_work_area(work_area: Rect, puck: Size, corner: DockCorner) -> Rect {
+    let horizontal = puck.width.saturating_sub(PUCK_OVERLAP as u32);
+    let vertical = puck.height.saturating_sub(PUCK_OVERLAP as u32);
+    let inset_x = horizontal.min(work_area.width);
+    let inset_y = vertical.min(work_area.height);
+    let x = match corner {
+        DockCorner::TopLeft | DockCorner::BottomLeft => {
+            to_i32(i64::from(work_area.x) + i64::from(inset_x))
+        }
+        DockCorner::TopRight | DockCorner::BottomRight => work_area.x,
+    };
+    let y = match corner {
+        DockCorner::TopLeft | DockCorner::TopRight => {
+            to_i32(i64::from(work_area.y) + i64::from(inset_y))
+        }
+        DockCorner::BottomLeft | DockCorner::BottomRight => work_area.y,
+    };
+
+    Rect::new(
+        x,
+        y,
+        work_area.width.saturating_sub(inset_x),
+        work_area.height.saturating_sub(inset_y),
+    )
+}
+
 #[derive(Clone, Copy)]
 struct Candidate {
     position: Point,
@@ -266,8 +294,8 @@ fn to_i32(value: i64) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        clamp_window_position, fit_window_inner_size, panel_placement, puck_position,
-        restore_relative_position, window_frame_size, DockCorner, Point, Rect, Size,
+        clamp_window_position, dock_safe_panel_work_area, fit_window_inner_size, panel_placement,
+        puck_position, restore_relative_position, window_frame_size, DockCorner, Point, Rect, Size,
     };
 
     const PANEL: Size = Size::new(420, 720);
@@ -380,5 +408,19 @@ mod tests {
             clamp_window_position(Rect::new(-2_200, -200, 420, 720), work_area),
             Point::new(-1_920, -40),
         );
+    }
+
+    #[test]
+    fn reserves_visible_puck_space_for_each_attached_corner() {
+        let cases = [
+            (DockCorner::TopLeft, Rect::new(48, 48, 1_872, 992)),
+            (DockCorner::TopRight, Rect::new(0, 48, 1_872, 992)),
+            (DockCorner::BottomLeft, Rect::new(48, 0, 1_872, 992)),
+            (DockCorner::BottomRight, Rect::new(0, 0, 1_872, 992)),
+        ];
+
+        for (corner, expected) in cases {
+            assert_eq!(dock_safe_panel_work_area(WORK_AREA, PUCK, corner), expected);
+        }
     }
 }
