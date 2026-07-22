@@ -15,6 +15,7 @@ use self::position::{panel_position, restore_relative_position, Point, Rect, Siz
 
 const PANEL_LABEL: &str = "panel";
 const PUCK_LABEL: &str = "puck";
+const PANEL_VISIBILITY_EVENT: &str = "panel_visibility_changed";
 const SETTINGS_FILE: &str = "settings.json";
 const DEFAULT_PUCK_MARGIN: i32 = 24;
 
@@ -28,7 +29,6 @@ pub struct PuckMenu(pub tauri::menu::Menu<Wry>);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PanelAction {
     Show,
-    Toggle,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -53,9 +53,16 @@ pub fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|value| serde_json::from_value::<Vec<String>>(value).ok())
         .and_then(|recent| recent.into_iter().next())
     {
-        let _ = app
-            .state::<crate::commands::RepositoryState>()
-            .select(path.into());
+        let app_handle = app.handle().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let restored = app_handle
+                .state::<crate::commands::RepositoryState>()
+                .restore_if_empty(path.into())
+                .unwrap_or(false);
+            if restored {
+                let _ = request_refresh(&app_handle);
+            }
+        });
     }
 
     if let Some(panel) = app.get_webview_window(PANEL_LABEL) {
@@ -69,27 +76,17 @@ pub fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[tauri::command]
-pub fn toggle_panel(app: AppHandle) -> Result<(), String> {
+pub fn show_panel(app: AppHandle) -> Result<(), String> {
     perform_panel_action(&app, puck_click_action())
 }
 
 pub(crate) fn puck_click_action() -> PanelAction {
-    PanelAction::Toggle
+    PanelAction::Show
 }
 
 pub(crate) fn perform_panel_action(app: &AppHandle, action: PanelAction) -> Result<(), String> {
     match action {
-        PanelAction::Show => show_panel(app),
-        PanelAction::Toggle => toggle_panel_for(app),
-    }
-}
-
-fn toggle_panel_for(app: &AppHandle) -> Result<(), String> {
-    let panel = window(app, PANEL_LABEL)?;
-    if panel.is_visible().map_err(safe_window_error)? {
-        panel.hide().map_err(safe_window_error)
-    } else {
-        show_panel(app)
+        PanelAction::Show => show_panel_for(app),
     }
 }
 
@@ -133,7 +130,11 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
             if window.label() == PANEL_LABEL || window.label() == PUCK_LABEL =>
         {
             api.prevent_close();
-            let _ = window.hide();
+            if window.label() == PANEL_LABEL {
+                hide_panel_window(window);
+            } else {
+                let _ = window.hide();
+            }
         }
         WindowEvent::Focused(false) if window.label() == PANEL_LABEL => {
             let pinned = window
@@ -142,26 +143,36 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
                 .pinned
                 .load(Ordering::Relaxed);
             if !pinned {
-                let _ = window.hide();
+                hide_panel_window(window);
             }
         }
         _ => {}
     }
 }
 
-pub(crate) fn show_panel(app: &AppHandle) -> Result<(), String> {
-    position_panel(app)?;
+pub(crate) fn show_panel_for(app: &AppHandle) -> Result<(), String> {
     let panel = window(app, PANEL_LABEL)?;
-    panel.unminimize().map_err(safe_window_error)?;
+    if let Err(error) = position_panel(app) {
+        eprintln!("RepoPuck could not reposition the panel: {error}");
+    }
+    let _ = panel.unminimize();
     panel.show().map_err(safe_window_error)?;
-    panel.set_focus().map_err(safe_window_error)
+    let _ = panel.emit(PANEL_VISIBILITY_EVENT, true);
+    let _ = panel.set_focus();
+    Ok(())
 }
 
 pub(crate) fn open_settings_window(app: &AppHandle) -> Result<(), String> {
-    show_panel(app)?;
+    show_panel_for(app)?;
     window(app, PANEL_LABEL)?
         .emit("open_settings_requested", ())
         .map_err(|_| "Could not open settings".to_owned())
+}
+
+fn hide_panel_window(window: &Window) {
+    if window.hide().is_ok() {
+        let _ = window.emit(PANEL_VISIBILITY_EVENT, false);
+    }
 }
 
 pub(crate) fn request_refresh(app: &AppHandle) -> Result<(), String> {
@@ -312,5 +323,19 @@ mod tests {
         assert_eq!(csp["default-src"], "'self'");
         assert_eq!(csp["connect-src"], "ipc: http://ipc.localhost");
         assert_eq!(csp["object-src"], "'none'");
+    }
+
+    #[test]
+    fn panel_can_query_native_visibility_for_polling_control() {
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../../capabilities/panel.json"))
+                .expect("valid panel capability");
+        let permissions = capability["permissions"]
+            .as_array()
+            .expect("permission array");
+
+        assert!(permissions
+            .iter()
+            .any(|permission| permission == "core:window:allow-is-visible"));
     }
 }

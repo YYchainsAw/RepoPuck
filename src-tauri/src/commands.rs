@@ -7,7 +7,7 @@ use std::{
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_store::StoreExt;
 
 use crate::git::{
@@ -23,13 +23,30 @@ pub struct RepositoryState {
 
 impl RepositoryState {
     pub(crate) fn select(&self, path: PathBuf) -> Result<(), GitError> {
+        // Repository discovery runs Git. Keep it outside the session lock so an in-flight
+        // operation can finish without also blocking validation of the next selection.
+        let service = GitService::open(&path)?;
         let mut selected = self
             .service
             .lock()
             .map_err(|_| GitError::safe("Repository state is unavailable"))?;
-        let service = GitService::open(&path)?;
         *selected = Some(service);
         Ok(())
+    }
+
+    pub(crate) fn restore_if_empty(&self, path: PathBuf) -> Result<bool, GitError> {
+        // Startup restoration may finish after the user has explicitly selected another
+        // repository. Validate outside the lock, then install only if state is still empty.
+        let service = GitService::open(&path)?;
+        let mut selected = self
+            .service
+            .lock()
+            .map_err(|_| GitError::safe("Repository state is unavailable"))?;
+        if selected.is_some() {
+            return Ok(false);
+        }
+        *selected = Some(service);
+        Ok(true)
     }
 
     fn with_service<T>(
@@ -59,143 +76,166 @@ impl RepositoryState {
 }
 
 #[tauri::command]
-pub fn select_repository(
-    path: String,
-    app: AppHandle,
-    state: State<'_, RepositoryState>,
-) -> OperationResult {
+pub async fn select_repository(path: String, app: AppHandle) -> OperationResult {
     let selected = PathBuf::from(path);
-    match state.select(selected) {
-        Ok(()) => match state.selected_path() {
-            Ok(path) if persist_recent_repository(&app, &path).is_ok() => {
-                OperationResult::success("Repository selected")
-            }
-            _ => OperationResult::success(
-                "Repository selected, but recent history could not be saved",
-            ),
-        },
-        Err(error) => failure(error),
+    let persistence_app = app.clone();
+    match with_repository(app, move |state| {
+        state.select(selected).map_err(error_message)?;
+        state.selected_path()
+    })
+    .await
+    {
+        Ok(path) if persist_recent_repository(&persistence_app, &path).is_ok() => {
+            OperationResult::success("Repository selected")
+        }
+        Ok(_) => {
+            OperationResult::success("Repository selected, but recent history could not be saved")
+        }
+        Err(message) => OperationResult::failure(message),
     }
 }
 
 #[tauri::command]
-pub fn get_snapshot(state: State<'_, RepositoryState>) -> Result<RepositorySnapshot, String> {
-    state.with_service(GitService::snapshot)
+pub async fn get_snapshot(app: AppHandle) -> Result<RepositorySnapshot, String> {
+    with_repository(app, |state| state.with_service(GitService::snapshot)).await
 }
 
 #[tauri::command]
-pub fn set_staged(
-    paths: Vec<String>,
-    staged: bool,
-    state: State<'_, RepositoryState>,
-) -> OperationResult {
-    operate(
-        &state,
-        |service| service.set_staged(&paths, staged),
+pub async fn get_change_count(app: AppHandle) -> Result<usize, String> {
+    with_repository(app, |state| state.with_service(GitService::change_count)).await
+}
+
+#[tauri::command]
+pub async fn set_staged(paths: Vec<String>, staged: bool, app: AppHandle) -> OperationResult {
+    operate_blocking(
+        app,
+        move |service| service.set_staged(&paths, staged),
         "Staging updated",
     )
+    .await
 }
 
 #[tauri::command]
-pub fn commit(message: String, state: State<'_, RepositoryState>) -> OperationResult {
-    operate(
-        &state,
-        |service| service.commit(&message),
+pub async fn commit(message: String, app: AppHandle) -> OperationResult {
+    operate_blocking(
+        app,
+        move |service| service.commit(&message),
         "Changes committed",
     )
+    .await
 }
 
 #[tauri::command]
-pub fn amend_last_commit(
-    message: Option<String>,
-    state: State<'_, RepositoryState>,
-) -> OperationResult {
-    operate(
-        &state,
-        |service| service.amend_last_commit(message.as_deref()),
+pub async fn amend_last_commit(message: Option<String>, app: AppHandle) -> OperationResult {
+    operate_blocking(
+        app,
+        move |service| service.amend_last_commit(message.as_deref()),
         "Last commit amended",
     )
+    .await
 }
 
 #[tauri::command]
-pub fn push(state: State<'_, RepositoryState>) -> OperationResult {
-    operate(&state, GitService::push, "Changes pushed")
+pub async fn push(app: AppHandle) -> OperationResult {
+    operate_blocking(app, GitService::push, "Changes pushed").await
 }
 
 #[tauri::command]
-pub fn commit_and_push(message: String, state: State<'_, RepositoryState>) -> OperationResult {
-    operate(
-        &state,
-        |service| {
+pub async fn commit_and_push(message: String, app: AppHandle) -> OperationResult {
+    operate_blocking(
+        app,
+        move |service| {
             service.commit(&message)?;
             service.push()
         },
         "Changes committed and pushed",
     )
+    .await
 }
 
 #[tauri::command]
-pub fn switch_branch(branch: String, state: State<'_, RepositoryState>) -> OperationResult {
-    operate(
-        &state,
-        |service| service.switch_branch(&branch),
+pub async fn switch_branch(branch: String, app: AppHandle) -> OperationResult {
+    operate_blocking(
+        app,
+        move |service| service.switch_branch(&branch),
         "Branch switched",
     )
+    .await
 }
 
 #[tauri::command]
-pub fn create_branch(branch: String, state: State<'_, RepositoryState>) -> OperationResult {
-    operate(
-        &state,
-        |service| service.create_branch(&branch),
+pub async fn create_branch(branch: String, app: AppHandle) -> OperationResult {
+    operate_blocking(
+        app,
+        move |service| service.create_branch(&branch),
         "Branch created",
     )
+    .await
 }
 
 #[tauri::command]
-pub fn fetch(state: State<'_, RepositoryState>) -> OperationResult {
-    operate(&state, GitService::fetch, "Fetch complete")
+pub async fn fetch(app: AppHandle) -> OperationResult {
+    operate_blocking(app, GitService::fetch, "Fetch complete").await
 }
 
 #[tauri::command]
-pub fn pull(state: State<'_, RepositoryState>) -> OperationResult {
-    operate(&state, GitService::pull, "Pull complete")
+pub async fn pull(app: AppHandle) -> OperationResult {
+    operate_blocking(app, GitService::pull, "Pull complete").await
 }
 
 #[tauri::command]
-pub fn stash(state: State<'_, RepositoryState>) -> OperationResult {
-    operate(&state, GitService::stash, "Changes stashed")
+pub async fn stash(app: AppHandle) -> OperationResult {
+    operate_blocking(app, GitService::stash, "Changes stashed").await
 }
 
 #[tauri::command]
-pub fn open_terminal(state: State<'_, RepositoryState>) -> OperationResult {
-    match state.selected_path().and_then(|path| spawn_terminal(&path)) {
+pub async fn open_terminal(app: AppHandle) -> OperationResult {
+    match with_repository(app, |state| {
+        state.selected_path().and_then(|path| spawn_terminal(&path))
+    })
+    .await
+    {
         Ok(()) => OperationResult::success("Terminal opened"),
         Err(message) => OperationResult::failure(message),
     }
 }
 
 #[tauri::command]
-pub fn open_explorer(state: State<'_, RepositoryState>) -> OperationResult {
-    match state.selected_path().and_then(|path| spawn_explorer(&path)) {
+pub async fn open_explorer(app: AppHandle) -> OperationResult {
+    match with_repository(app, |state| {
+        state.selected_path().and_then(|path| spawn_explorer(&path))
+    })
+    .await
+    {
         Ok(()) => OperationResult::success("Explorer opened"),
         Err(message) => OperationResult::failure(message),
     }
 }
 
-fn operate(
-    state: &State<'_, RepositoryState>,
-    operation: impl FnOnce(&GitService) -> Result<(), GitError>,
-    success_message: &str,
+async fn operate_blocking(
+    app: AppHandle,
+    operation: impl FnOnce(&GitService) -> Result<(), GitError> + Send + 'static,
+    success_message: &'static str,
 ) -> OperationResult {
-    match state.with_service(operation) {
+    match with_repository(app, move |state| state.with_service(operation)).await {
         Ok(()) => OperationResult::success(success_message),
         Err(message) => OperationResult::failure(message),
     }
 }
 
-fn failure(error: GitError) -> OperationResult {
-    OperationResult::failure(error_message(error))
+async fn with_repository<T>(
+    app: AppHandle,
+    operation: impl FnOnce(&RepositoryState) -> Result<T, String> + Send + 'static,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<RepositoryState>();
+        operation(&state)
+    })
+    .await
+    .map_err(|_| "Git operation could not be scheduled".to_owned())?
 }
 
 fn error_message(error: GitError) -> String {
@@ -363,5 +403,26 @@ mod tests {
             .expect("selection finished after release")
             .expect("select replacement repository");
         selecting.join().expect("selection thread");
+    }
+
+    #[test]
+    fn startup_restore_never_replaces_an_explicit_selection() {
+        let restored_repository = TestRepository::new();
+        let explicit_repository = TestRepository::new();
+        let state = RepositoryState::default();
+
+        assert!(state
+            .restore_if_empty(restored_repository.0.clone())
+            .expect("restore initial repository"));
+        state
+            .select(explicit_repository.0.clone())
+            .expect("select explicit repository");
+        assert!(!state
+            .restore_if_empty(restored_repository.0.clone())
+            .expect("ignore late startup restore"));
+        assert_eq!(
+            state.selected_path().expect("selected path"),
+            explicit_repository.0
+        );
     }
 }

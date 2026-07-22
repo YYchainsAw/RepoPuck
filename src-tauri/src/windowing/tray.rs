@@ -58,14 +58,14 @@ pub fn setup(app: &App) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn tray_left_click_shows_the_panel_while_the_puck_command_toggles_it() {
+    fn tray_and_puck_clicks_both_show_the_panel() {
         assert_eq!(
             super::tray_left_click_action(),
             super::super::PanelAction::Show
         );
         assert_eq!(
             super::super::puck_click_action(),
-            super::super::PanelAction::Toggle
+            super::super::PanelAction::Show
         );
     }
 }

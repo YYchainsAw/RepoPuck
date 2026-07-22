@@ -16,6 +16,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::select_repository,
             commands::get_snapshot,
+            commands::get_change_count,
             commands::set_staged,
             commands::commit,
             commands::amend_last_commit,
@@ -28,7 +29,7 @@ pub fn run() {
             commands::stash,
             commands::open_terminal,
             commands::open_explorer,
-            windowing::toggle_panel,
+            windowing::show_panel,
             windowing::set_panel_pinned,
             windowing::save_puck_position,
             windowing::open_settings,
