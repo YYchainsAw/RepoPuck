@@ -351,6 +351,43 @@ describe("PanelShell", () => {
     delete document.documentElement.dataset.darkTheme;
   });
 
+  it("keeps native branch and settings options readable in dark mode", () => {
+    document.documentElement.dataset.colorMode = "dark";
+    document.documentElement.dataset.lightTheme = "light";
+    document.documentElement.dataset.darkTheme = "dark";
+    shell.current = {
+      ...shell.current,
+      colorMode: "dark",
+      settings: { ...shell.current.settings, theme: "dark" },
+    };
+    render(<PanelShell />);
+
+    const branchSelect = screen.getByRole("combobox", { name: "Branch" });
+    const branchOption = screen.getByRole("option", { name: "develop" });
+    expect(getComputedStyle(branchSelect).backgroundColor).toBe(
+      "var(--panel-subtle)",
+    );
+    expect(getComputedStyle(branchSelect).colorScheme).toBe("dark");
+    expect(getComputedStyle(branchOption).backgroundColor).toBe(
+      "var(--panel-surface)",
+    );
+    expect(getComputedStyle(branchOption).color).toBe("var(--panel-text)");
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Settings" }));
+    const themeSelect = screen.getByRole("combobox", { name: "Theme" });
+    const darkOption = screen.getByRole("option", { name: "Dark" });
+    expect(getComputedStyle(themeSelect).colorScheme).toBe("dark");
+    expect(getComputedStyle(darkOption).backgroundColor).toBe(
+      "var(--panel-surface)",
+    );
+    expect(getComputedStyle(darkOption).color).toBe("var(--panel-text)");
+
+    delete document.documentElement.dataset.colorMode;
+    delete document.documentElement.dataset.lightTheme;
+    delete document.documentElement.dataset.darkTheme;
+  });
+
   it("identifies the Push remote in the overflow menu when one is available", () => {
     workspace.current = createWorkspace({
       snapshot: {
