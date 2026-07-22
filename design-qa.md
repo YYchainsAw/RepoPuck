@@ -98,6 +98,7 @@ No actionable P0, P1, or P2 differences remain.
 - `top-left`, `top-right`, `bottom-left`, and `bottom-right` placements were forced and measured independently. Every panel remained inside the 1463 × 867 logical work area, the visible puck remained inside it, and corner attachment differed by only 0–1 logical px after DPI rounding.
 - A native resize was forced beyond the right work-area edge. RepoPuck clamped the 550 × 568 outer panel to x=860…1410, kept the visible puck at x=1405…1463, and preserved the 5–6 px logical overlap at 175% scaling. The panel stayed visible throughout.
 - After hiding and restarting, the same 550 × 568 outer panel and docked puck positions were restored exactly, demonstrating logical inner-size persistence without frame-size drift.
+- An 11-second CDP observation across both production WebViews recorded zero runtime exceptions, console warnings, or console errors. A separate 12-second Win32 scan observed 14 short-lived Git processes and zero new visible `ConsoleWindowClass` windows.
 - Automated gates for v0.1.2: 15 frontend files / 111 tests, 52 Rust tests, TypeScript type-check, ESLint, Rustfmt, Clippy with warnings denied, frontend production build, and release MSI packaging all passed.
 
 ## Open questions
