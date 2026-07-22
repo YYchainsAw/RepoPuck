@@ -48,7 +48,8 @@ The native code lives under `src-tauri/src/`.
 | Area | Responsibility |
 | --- | --- |
 | `commands.rs` | Tauri command boundary, shared repository state, and conversion to serializable responses. |
-| `git/runner.rs` | Bounded, non-interactive `std::process::Command` execution of the system `git` binary. |
+| `git/process.rs` | Windows no-console, suspended-start, Job Object, process-tree termination, and reader cancellation boundary. |
+| `git/runner.rs` | Bounded, non-interactive orchestration of the system `git` binary and its output readers. |
 | `git/parser.rs` | Pure parsing for porcelain status and numstat data. |
 | `git/service.rs` | Repository validation, staging, committing, pushing, branches, and safe secondary operations. |
 | `git/model.rs` | Rust-side models matching the TypeScript wire format. |
@@ -92,7 +93,7 @@ The submitted message is cleared only after a successful commit or Amend, and on
 
 ## Git execution and safety boundary
 
-RepoPuck launches `git` directly with `std::process::Command` and a vector of arguments. It never constructs a shell command string. Git stdin is closed, terminal prompting is disabled, stdout/stderr are drained concurrently with a retained-output limit, and a command that exceeds the operation timeout is stopped. Commands that accept repository paths place `--` before paths and use literal pathspecs; the service also rejects any staging path that is not present in the current porcelain snapshot.
+RepoPuck launches `git` directly with `std::process::Command` and a vector of arguments. It never constructs a shell command string. On Windows, Git is created suspended and without a console window, assigned to a per-operation Job Object with kill-on-close, and only then resumed. Git stdin is closed, terminal prompting is disabled, and stdout/stderr are drained concurrently with a retained-output limit. A timeout terminates the complete Job Object process tree and hands the canceled readers to a reaper, so credential helpers or transports cannot keep the serialized repository operation locked. Commands that accept repository paths place `--` before paths and use literal pathspecs; the service also rejects any staging path that is not present in the current porcelain snapshot.
 
 Selected directories are validated with Git and canonicalized before becoming repository state. Machine-readable output is preferred (`--porcelain` and NUL-delimited records where applicable). Push, fetch, and pull receive an explicit validated tracking remote/ref (or `origin` for first push) instead of inheriting ambient `push.default` or `remote.pushDefault` behavior. Errors are converted into conservative, user-safe diagnostics; credential-bearing URLs, secrets, environment values, and unrelated process data must not cross into UI notices.
 
@@ -113,7 +114,7 @@ RepoPuck has two native surfaces:
 
 The tray owns application lifetime. Closing a surface hides it; it does not terminate the process. Explicit `Quit` from the tray menu exits. A pinned panel stays on top, while an unpinned panel can hide after losing focus.
 
-Both webviews use a restrictive production content-security policy. Their Tauri capability set is limited to the core/window commands needed by the shell, repository selection, and the non-secret settings store; RepoPuck does not register or expose the filesystem plugin to frontend code.
+Both webviews use a restrictive production content-security policy. Capabilities are split per window: both can listen for shell events and access the non-secret settings store, only the panel can open the repository picker, and only the puck can initiate native dragging. RepoPuck does not register or expose the filesystem plugin to frontend code.
 
 Positioning is expressed as pure geometry first and then applied through Tauri window APIs. Tests cover each monitor edge so the panel cannot open outside the available work area.
 

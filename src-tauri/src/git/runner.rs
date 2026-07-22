@@ -8,8 +8,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+use super::process::{cancel_blocking_io, GitProcessGroup};
+
 const GIT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+type ReaderResult = io::Result<(Vec<u8>, bool)>;
+type ReaderHandle = thread::JoinHandle<ReaderResult>;
 
 #[derive(Clone, Debug)]
 pub struct GitRunner {
@@ -83,46 +87,48 @@ impl GitRunner {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let mut child = Command::new("git")
+        let process_group = GitProcessGroup::new().map_err(|_| GitError::isolation())?;
+        let mut command = Command::new("git");
+        command
             .current_dir(&self.repository)
             .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .env("GIT_TERMINAL_PROMPT", "0")
-            .env("GIT_PAGER", "cat")
-            .spawn()
-            .map_err(|_| GitError::unavailable())?;
+            .env("GIT_PAGER", "cat");
+        process_group.prepare_command(&mut command);
+        let mut child = command.spawn().map_err(|_| GitError::unavailable())?;
+        if process_group.attach_and_resume(&child).is_err() {
+            process_group.terminate();
+            let _ = child.kill();
+            return Err(GitError::isolation());
+        }
         let stdout = child.stdout.take().ok_or_else(GitError::unavailable)?;
         let stderr = child.stderr.take().ok_or_else(GitError::unavailable)?;
         let stdout_reader = thread::spawn(move || read_limited(stdout));
         let stderr_reader = thread::spawn(move || read_limited(stderr));
-        let started = Instant::now();
+        let deadline = Instant::now() + GIT_TIMEOUT;
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break status,
-                Ok(None) if started.elapsed() < GIT_TIMEOUT => {
+                Ok(None) if Instant::now() < deadline => {
                     thread::sleep(Duration::from_millis(10));
                 }
                 Ok(None) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    // A credential helper or transport may outlive Git while still
-                    // holding an inherited pipe. Detach the drainers here so the
-                    // timeout itself can never block while joining those pipes.
-                    drop(stdout_reader);
-                    drop(stderr_reader);
+                    stop_and_reap(&process_group, child, stdout_reader, stderr_reader);
                     return Err(GitError::timed_out());
                 }
                 Err(_) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    drop(stdout_reader);
-                    drop(stderr_reader);
+                    stop_and_reap(&process_group, child, stdout_reader, stderr_reader);
                     return Err(GitError::safe("Git process could not be monitored"));
                 }
             }
         };
+        if !readers_finished_before(&stdout_reader, &stderr_reader, deadline) {
+            stop_and_reap(&process_group, child, stdout_reader, stderr_reader);
+            return Err(GitError::timed_out());
+        }
         let (stdout, stdout_truncated) = join_reader(stdout_reader)?;
         let (stderr, stderr_truncated) = join_reader(stderr_reader)?;
         Ok(GitOutput {
@@ -157,13 +163,50 @@ fn read_limited(mut reader: impl Read) -> io::Result<(Vec<u8>, bool)> {
     }
 }
 
-fn join_reader(
-    reader: thread::JoinHandle<io::Result<(Vec<u8>, bool)>>,
-) -> Result<(Vec<u8>, bool), GitError> {
+fn join_reader(reader: ReaderHandle) -> Result<(Vec<u8>, bool), GitError> {
     reader
         .join()
         .map_err(|_| GitError::safe("Git process output could not be read"))?
         .map_err(|_| GitError::safe("Git process output could not be read"))
+}
+
+fn readers_finished_before(
+    stdout_reader: &ReaderHandle,
+    stderr_reader: &ReaderHandle,
+    deadline: Instant,
+) -> bool {
+    while !stdout_reader.is_finished() || !stderr_reader.is_finished() {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    true
+}
+
+fn stop_and_reap(
+    process_group: &GitProcessGroup,
+    mut child: std::process::Child,
+    stdout_reader: ReaderHandle,
+    stderr_reader: ReaderHandle,
+) {
+    process_group.terminate();
+    let _ = child.kill();
+    cancel_blocking_io(&stdout_reader);
+    cancel_blocking_io(&stderr_reader);
+    // The job has been terminated, so all inherited writer handles are closing. Reap the
+    // readers away from the serialized repository operation instead of leaking them or
+    // extending the UI timeout.
+    if let Err(error) = thread::Builder::new()
+        .name("repopuck-git-output-reaper".to_owned())
+        .spawn(move || {
+            let _ = child.wait();
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+        })
+    {
+        eprintln!("RepoPuck could not start the Git output reaper: {error}");
+    }
 }
 
 impl GitError {
@@ -179,6 +222,10 @@ impl GitError {
 
     fn unavailable() -> Self {
         Self::safe("Git is unavailable on PATH")
+    }
+
+    fn isolation() -> Self {
+        Self::safe("Git process could not be isolated safely")
     }
 
     fn timed_out() -> Self {
@@ -373,8 +420,11 @@ fn sanitize_scp_remote(value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
+    use std::{thread, time::Duration};
 
-    use super::{read_limited, sanitize_remote_url, GitError, MAX_OUTPUT_BYTES};
+    use super::{
+        read_limited, readers_finished_before, sanitize_remote_url, GitError, MAX_OUTPUT_BYTES,
+    };
 
     #[test]
     fn bounded_reader_drains_output_without_retaining_more_than_the_limit() {
@@ -383,6 +433,21 @@ mod tests {
 
         assert_eq!(output.len(), MAX_OUTPUT_BYTES);
         assert!(truncated);
+    }
+
+    #[test]
+    fn reader_wait_respects_the_operation_deadline() {
+        let stdout_reader = thread::spawn(|| Ok((Vec::new(), false)));
+        let stderr_reader = thread::spawn(|| {
+            thread::sleep(Duration::from_millis(50));
+            Ok((Vec::new(), false))
+        });
+
+        assert!(!readers_finished_before(
+            &stdout_reader,
+            &stderr_reader,
+            std::time::Instant::now() + Duration::from_millis(5)
+        ));
     }
 
     #[test]

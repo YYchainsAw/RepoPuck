@@ -37,7 +37,7 @@ The full comparison history and responsive/state evidence are recorded in [desig
 
 RepoPuck does **not** ask you to sign in to GitHub and does not store GitHub tokens, passwords, SSH keys, or Git credentials.
 
-Local operations use the `git` executable installed on your system. When a remote operation needs authentication, Git delegates it to your existing setup—typically Git Credential Manager over HTTPS or your configured SSH agent and keys. RepoPuck disables terminal prompting inside its process, bounds command output, stops commands that exceed the operation timeout, and explicitly targets the branch's configured tracking remote/ref instead of relying on ambient push defaults. If `git push` works in a terminal for the repository, RepoPuck uses the same credential path.
+Local operations use the `git` executable installed on your system. When a remote operation needs authentication, Git delegates it to your existing setup—typically Git Credential Manager over HTTPS or your configured SSH agent and keys. RepoPuck disables terminal prompting, launches Git without a console window, bounds command output, and places each operation in a Windows Job Object before execution so a timeout stops the complete helper/transport process tree. It also explicitly targets the branch's configured tracking remote/ref instead of relying on ambient push defaults. If `git push` works in a terminal for the repository, RepoPuck uses the same credential path.
 
 RepoPuck does not open an interactive credential prompt inside its compact panel. If authentication is not configured yet, complete a `git fetch` or `git push` in a terminal first, then retry the operation in RepoPuck.
 
