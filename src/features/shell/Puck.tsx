@@ -9,6 +9,7 @@ import "./native-shell.css";
 
 interface PuckProps {
   changeCount: number;
+  expanded?: boolean;
   client?: NativeShellClient;
 }
 
@@ -21,7 +22,11 @@ interface PointerOrigin {
 
 const DRAG_THRESHOLD = 8;
 
-export function Puck({ changeCount, client: injectedClient }: PuckProps) {
+export function Puck({
+  changeCount,
+  expanded = false,
+  client: injectedClient,
+}: PuckProps) {
   const clientRef = useRef(injectedClient ?? createNativeShellClient());
   const gesture = useRef<PointerOrigin | null>(null);
   const toggleRequest = useRef<Promise<void> | null>(null);
@@ -126,6 +131,7 @@ export function Puck({ changeCount, client: injectedClient }: PuckProps) {
         className="puck-button"
         type="button"
         aria-label={`Toggle Git panel, ${countLabel}`}
+        aria-expanded={expanded}
         title="Show or hide RepoPuck"
         onPointerDown={startPointer}
         onPointerMove={movePointer}

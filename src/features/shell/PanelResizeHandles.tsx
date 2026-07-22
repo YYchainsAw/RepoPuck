@@ -24,8 +24,15 @@ const resizeDirections: ResizeDirection[] = [
 
 const isTauriRuntime = () => "__TAURI_INTERNALS__" in window;
 
-export function PanelResizeHandles() {
+interface PanelResizeHandlesProps {
+  disabledDirections?: readonly ResizeDirection[];
+}
+
+export function PanelResizeHandles({
+  disabledDirections = [],
+}: PanelResizeHandlesProps) {
   if (!isTauriRuntime()) return null;
+  const disabled = new Set(disabledDirections);
 
   const startResize = (
     event: ReactPointerEvent<HTMLDivElement>,
@@ -39,7 +46,7 @@ export function PanelResizeHandles() {
 
   return (
     <div className="panel-resize-handles" aria-hidden="true">
-      {resizeDirections.map((direction) => (
+      {resizeDirections.filter((direction) => !disabled.has(direction)).map((direction) => (
         <div
           key={direction}
           className={`panel-resize-handle panel-resize-handle--${direction.toLowerCase()}`}

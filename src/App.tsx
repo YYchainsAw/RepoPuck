@@ -5,6 +5,11 @@ import {
   DEFAULT_SHELL_SETTINGS,
   type ShellSettings,
 } from "./features/shell/settings";
+import {
+  DEFAULT_NATIVE_SHELL_STATE,
+  NativeShellStateProvider,
+  type NativeShellStateSnapshot,
+} from "./features/shell/useNativeShellState";
 
 export type WindowView = "panel" | "puck";
 
@@ -20,21 +25,25 @@ export function getWindowView(search = window.location.search): WindowView {
 interface AppProps {
   view?: WindowView;
   initialSettings?: ShellSettings;
+  initialNativeShellState?: NativeShellStateSnapshot;
 }
 
 export function App({
   view = getWindowView(),
   initialSettings = DEFAULT_SHELL_SETTINGS,
+  initialNativeShellState = DEFAULT_NATIVE_SHELL_STATE,
 }: AppProps) {
   return (
-    <ShellSettingsProvider initialSettings={initialSettings}>
-      {view === "puck" ? (
-        <PuckWindow />
-      ) : (
-        <Suspense fallback={null}>
-          <PanelWindow />
-        </Suspense>
-      )}
-    </ShellSettingsProvider>
+    <NativeShellStateProvider initialState={initialNativeShellState}>
+      <ShellSettingsProvider initialSettings={initialSettings}>
+        {view === "puck" ? (
+          <PuckWindow />
+        ) : (
+          <Suspense fallback={null}>
+            <PanelWindow />
+          </Suspense>
+        )}
+      </ShellSettingsProvider>
+    </NativeShellStateProvider>
   );
 }

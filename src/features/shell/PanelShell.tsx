@@ -10,6 +10,7 @@ import { createNativeShellClient } from "./nativeClient";
 import { Notice } from "./Notice";
 import { SettingsDialog } from "./SettingsDialog";
 import { useShellSettings } from "./ShellSettingsProvider";
+import { useNativeShellState } from "./useNativeShellState";
 
 const busyLabels = {
   selectRepository: "Choosing repository…",
@@ -31,6 +32,7 @@ const busyLabels = {
 export function PanelShell() {
   const workspace = useGitWorkspace();
   const shell = useShellSettings();
+  const nativeShell = useNativeShellState();
   const nativeClient = useRef(createNativeShellClient()).current;
   const dark = shell.colorMode === "dark";
   const pinned = shell.settings.pinned;
@@ -254,6 +256,10 @@ export function PanelShell() {
           <SettingsDialog
             open={settingsOpen}
             settings={shell.settings}
+            shellMode={nativeShell.state.mode}
+            shellModePending={nativeShell.modePending}
+            shellModeError={nativeShell.modeError}
+            onShellModeChange={(mode) => void nativeShell.setMode(mode)}
             onThemeChange={shell.setTheme}
             onPinnedChange={shell.setPinned}
             onClearRecent={shell.clearRecentRepositories}

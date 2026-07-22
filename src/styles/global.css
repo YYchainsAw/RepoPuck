@@ -23,13 +23,34 @@ html[data-window-view="puck"] body {
   overflow: hidden;
 }
 
-html[data-window-view="puck"],
-html[data-window-view="puck"] body,
-html[data-window-view="puck"] #root {
+html[data-window-view="puck"][data-shell-mode="puck"],
+html[data-window-view="puck"][data-shell-mode="puck"] body,
+html[data-window-view="puck"][data-shell-mode="puck"] #root,
+html[data-window-view="puck"]:not([data-shell-mode]),
+html[data-window-view="puck"]:not([data-shell-mode]) body,
+html[data-window-view="puck"]:not([data-shell-mode]) #root {
   height: 58px;
   min-height: 58px;
   min-width: 58px;
   width: 58px;
+}
+
+html[data-window-view="puck"][data-shell-mode="top-island"],
+html[data-window-view="puck"][data-shell-mode="top-island"] body,
+html[data-window-view="puck"][data-shell-mode="top-island"] #root {
+  height: 48px;
+  min-height: 48px;
+  min-width: 240px;
+  width: 240px;
+}
+
+html[data-window-view="puck"][data-shell-mode="top-drawer"],
+html[data-window-view="puck"][data-shell-mode="top-drawer"] body,
+html[data-window-view="puck"][data-shell-mode="top-drawer"] #root {
+  height: 1px;
+  min-height: 1px;
+  min-width: 1px;
+  width: 1px;
 }
 
 .panel-shell {
@@ -94,15 +115,52 @@ html[data-window-view="puck"] #root {
   transform-origin: bottom right;
 }
 
-.panel-window-content--opening {
-  animation: panel-open 160ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+.panel-window-frame--top-center .panel-window-content {
+  --panel-open-translate-x: 0;
+  --panel-open-translate-y: -8px;
+  transform-origin: top center;
+}
+
+.panel-window-frame[data-panel-mode="top-drawer"] .panel-shell {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.panel-window-content--transitioning {
+  animation-duration: 160ms;
+  animation-fill-mode: both;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.panel-window-content--opening.panel-window-content--corner-scale {
+  animation-name: panel-corner-open;
+}
+
+.panel-window-content--closing.panel-window-content--corner-scale {
+  animation-name: panel-corner-close;
+}
+
+.panel-window-content--opening.panel-window-content--island-drop {
+  animation-name: panel-island-open;
+}
+
+.panel-window-content--closing.panel-window-content--island-drop {
+  animation-name: panel-island-close;
+}
+
+.panel-window-content--opening.panel-window-content--drawer-roll {
+  animation-name: panel-drawer-open;
+}
+
+.panel-window-content--closing.panel-window-content--drawer-roll {
+  animation-name: panel-drawer-close;
 }
 
 .panel-window-content--concealed {
   opacity: 0;
 }
 
-@keyframes panel-open {
+@keyframes panel-corner-open {
   from {
     opacity: 0;
     transform: translate(
@@ -115,6 +173,74 @@ html[data-window-view="puck"] #root {
   to {
     opacity: 1;
     transform: translate(0, 0) scale(1);
+  }
+}
+
+@keyframes panel-corner-close {
+  from {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate(
+        var(--panel-open-translate-x),
+        var(--panel-open-translate-y)
+      )
+      scale(0.985);
+  }
+}
+
+@keyframes panel-island-open {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes panel-island-close {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.985);
+  }
+}
+
+@keyframes panel-drawer-open {
+  from {
+    clip-path: inset(0 0 100% 0 round 0 0 var(--panel-radius) var(--panel-radius));
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+
+  to {
+    clip-path: inset(0 0 0 0 round 0 0 var(--panel-radius) var(--panel-radius));
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes panel-drawer-close {
+  from {
+    clip-path: inset(0 0 0 0 round 0 0 var(--panel-radius) var(--panel-radius));
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    clip-path: inset(0 0 100% 0 round 0 0 var(--panel-radius) var(--panel-radius));
+    opacity: 0;
+    transform: translateY(-16px);
   }
 }
 
@@ -202,8 +328,8 @@ html[data-window-view="puck"] #root {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .panel-window-content--opening {
-    animation: none;
+  .panel-window-content--transitioning {
+    animation: none !important;
   }
 }
 
