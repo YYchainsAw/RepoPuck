@@ -25,6 +25,7 @@ const PANEL_VISIBILITY_EVENT: &str = "panel_visibility_changed";
 const PANEL_OPENED_EVENT: &str = "panel_opened";
 const SETTINGS_FILE: &str = "settings.json";
 const DEFAULT_PUCK_MARGIN: i32 = 24;
+const PUCK_LOGICAL_SIZE: f64 = 58.0;
 const PANEL_MIN_WIDTH: f64 = 360.0;
 const PANEL_MIN_HEIGHT: f64 = 560.0;
 const PANEL_MAX_WIDTH: f64 = 720.0;
@@ -233,7 +234,7 @@ fn position_panel(app: &AppHandle) -> Result<DockCorner, String> {
     let puck = window(app, PUCK_LABEL)?;
     let panel = window(app, PANEL_LABEL)?;
     let puck_position = puck.outer_position().map_err(safe_window_error)?;
-    let puck_size = puck.outer_size().map_err(safe_window_error)?;
+    let puck_size = puck_content_size(&puck)?;
     let monitor = current_monitor(&puck, app)?;
     let work_area = monitor_rect(&monitor);
     let logical_inner = panel_logical_inner_size(&panel)?;
@@ -353,7 +354,7 @@ fn reposition_puck_for_panel(app: &AppHandle) -> Result<(), String> {
     }
     let panel_position = panel.outer_position().map_err(safe_window_error)?;
     let panel_size = panel.outer_size().map_err(safe_window_error)?;
-    let puck_size = puck.outer_size().map_err(safe_window_error)?;
+    let puck_size = puck_content_size(&puck)?;
     let monitor = current_monitor(&panel, app)?;
     let work_area = monitor_rect(&monitor);
     let position = puck_position(
@@ -499,22 +500,23 @@ fn restore_puck_position(app: &App) -> Result<(), String> {
         .or_else(|| monitors.into_iter().next())
         .ok_or_else(|| "No monitor is available".to_owned())?;
     let work_area = monitor_rect(&monitor);
-    let current_scale = puck.scale_factor().map_err(safe_window_error)?;
-    let logical_inner = puck
-        .inner_size()
-        .map_err(safe_window_error)?
-        .to_logical::<f64>(current_scale);
-    let estimated_size = estimated_outer_size(&puck, logical_inner, monitor.scale_factor())?;
+    let visual_size = puck_content_size_for_scale(monitor.scale_factor());
     let relative = saved
         .map(|position| Point::new(position.x, position.y))
-        .unwrap_or_else(|| default_relative_position(estimated_size, work_area));
-    let provisional = restore_relative_position(relative, estimated_size, work_area);
-    set_window_position_if_changed(&puck, provisional)?;
-    puck.set_size(logical_inner).map_err(safe_window_error)?;
-    let actual = puck.outer_size().map_err(safe_window_error)?;
-    let final_position =
-        restore_relative_position(relative, Size::new(actual.width, actual.height), work_area);
-    set_window_position_if_changed(&puck, final_position).map(|_| ())
+        .unwrap_or_else(|| default_relative_position(visual_size, work_area));
+    let position = restore_relative_position(relative, visual_size, work_area);
+    set_window_position_if_changed(&puck, position).map(|_| ())
+}
+
+fn puck_content_size(puck: &WebviewWindow) -> Result<Size, String> {
+    let scale_factor = puck.scale_factor().map_err(safe_window_error)?;
+    Ok(puck_content_size_for_scale(scale_factor))
+}
+
+fn puck_content_size_for_scale(scale_factor: f64) -> Size {
+    let physical =
+        LogicalSize::new(PUCK_LOGICAL_SIZE, PUCK_LOGICAL_SIZE).to_physical::<u32>(scale_factor);
+    Size::new(physical.width, physical.height)
 }
 
 fn default_relative_position(puck: Size, work_area: Rect) -> Point {
@@ -563,7 +565,9 @@ fn safe_store_error(_: tauri_plugin_store::Error) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{clamp_panel_size, PANEL_MAX_HEIGHT, PANEL_MAX_WIDTH};
+    use super::{
+        clamp_panel_size, puck_content_size_for_scale, Size, PANEL_MAX_HEIGHT, PANEL_MAX_WIDTH,
+    };
 
     #[test]
     fn puck_window_configuration_is_focusable_for_keyboard_access() {
@@ -635,5 +639,11 @@ mod tests {
             (PANEL_MAX_WIDTH, PANEL_MAX_HEIGHT)
         );
         assert_eq!(clamp_panel_size(512.0, 800.0), (512.0, 800.0));
+    }
+
+    #[test]
+    fn puck_geometry_uses_visible_content_instead_of_the_windows_minimum_frame() {
+        assert_eq!(puck_content_size_for_scale(1.0), Size::new(58, 58));
+        assert_eq!(puck_content_size_for_scale(1.75), Size::new(102, 102));
     }
 }
