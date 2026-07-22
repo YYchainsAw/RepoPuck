@@ -1,15 +1,33 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import "../../styles/tokens.css";
 import "../../styles/global.css";
 import type { NativeShellClient } from "./nativeClient";
 import { Puck } from "./Puck";
 
+interface PointerInit extends MouseEventInit {
+  pointerId?: number;
+  isPrimary?: boolean;
+}
+
+function firePointer(
+  target: Element,
+  type: "pointerdown" | "pointermove" | "pointerup" | "pointercancel",
+  { pointerId = 1, isPrimary = true, ...init }: PointerInit,
+) {
+  const event = new MouseEvent(type, { bubbles: true, ...init });
+  Object.defineProperties(event, {
+    pointerId: { value: pointerId },
+    isPrimary: { value: isPrimary },
+  });
+  fireEvent(target, event);
+}
+
 function createClient(): NativeShellClient {
   return {
-    togglePanel: vi.fn().mockResolvedValue(undefined),
+    showPanel: vi.fn().mockResolvedValue(undefined),
     setPanelPinned: vi.fn().mockResolvedValue(undefined),
     savePuckPosition: vi.fn().mockResolvedValue(undefined),
     openSettings: vi.fn().mockResolvedValue(undefined),
@@ -19,28 +37,27 @@ function createClient(): NativeShellClient {
   };
 }
 
-it("shows the changed-file badge and toggles the panel on click", () => {
+it("shows the changed-file badge and opens the panel on click", () => {
   const client = createClient();
   render(<Puck changeCount={4} client={client} />);
 
   expect(screen.getByText("4")).toHaveAccessibleName("4 changed files");
   fireEvent.click(screen.getByRole("button", { name: "Open Git panel, 4 changed files" }));
 
-  expect(client.togglePanel).toHaveBeenCalledTimes(1);
+  expect(client.showPanel).toHaveBeenCalledTimes(1);
 });
 
-it("keeps the launcher keyboard-focusable and opens the panel with Enter or Space", () => {
+it.each(["Enter", " "])("keeps the launcher keyboard-focusable and opens the panel with %j", (key) => {
   const client = createClient();
   render(<Puck changeCount={0} client={client} />);
   const puck = screen.getByRole("button", { name: "Open Git panel, no changed files" });
 
   puck.focus();
   expect(puck).toHaveFocus();
-  fireEvent.keyDown(puck, { key: "Enter" });
-  fireEvent.keyDown(puck, { key: " " });
-  fireEvent.keyDown(puck, { key: "Enter", repeat: true });
+  fireEvent.keyDown(puck, { key });
+  fireEvent.keyDown(puck, { key, repeat: true });
 
-  expect(client.togglePanel).toHaveBeenCalledTimes(2);
+  expect(client.showPanel).toHaveBeenCalledTimes(1);
 });
 
 it("caps a large visible badge without losing its accessible count", () => {
@@ -77,21 +94,154 @@ it("starts native dragging after pointer movement and saves the final position",
   render(<Puck changeCount={1} client={client} />);
   const puck = screen.getByRole("button", { name: "Open Git panel, 1 changed file" });
 
-  fireEvent(
-    puck,
-    new MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 10, clientY: 10 }),
-  );
-  fireEvent(
-    puck,
-    new MouseEvent("pointermove", { bubbles: true, clientX: 20, clientY: 20 }),
-  );
-  fireEvent(
-    puck,
-    new MouseEvent("pointerup", { bubbles: true, clientX: 20, clientY: 20 }),
-  );
-  fireEvent.click(puck);
+  firePointer(puck, "pointerdown", {
+    pointerId: 7,
+    button: 0,
+    buttons: 1,
+    clientX: 10,
+    clientY: 10,
+  });
+  firePointer(puck, "pointermove", {
+    pointerId: 7,
+    buttons: 1,
+    clientX: 20,
+    clientY: 20,
+  });
+  firePointer(puck, "pointerup", {
+    pointerId: 7,
+    button: 0,
+    buttons: 0,
+    clientX: 20,
+    clientY: 20,
+  });
+  fireEvent.click(puck, { detail: 1 });
 
   expect(client.startDragging).toHaveBeenCalledTimes(1);
   await waitFor(() => expect(client.savePuckPosition).toHaveBeenCalledTimes(1));
-  expect(client.togglePanel).not.toHaveBeenCalled();
+  expect(client.showPanel).not.toHaveBeenCalled();
+});
+
+it("opens on the next pointer gesture when native dragging produces no click", async () => {
+  const client = createClient();
+  render(<Puck changeCount={0} client={client} />);
+  const puck = screen.getByRole("button", { name: "Open Git panel, no changed files" });
+
+  firePointer(puck, "pointerdown", {
+    pointerId: 1,
+    button: 0,
+    buttons: 1,
+    clientX: 8,
+    clientY: 8,
+  });
+  firePointer(puck, "pointermove", {
+    pointerId: 1,
+    buttons: 1,
+    clientX: 22,
+    clientY: 22,
+  });
+  firePointer(puck, "pointerup", {
+    pointerId: 1,
+    button: 0,
+    buttons: 0,
+    clientX: 22,
+    clientY: 22,
+  });
+  await waitFor(() => expect(client.savePuckPosition).toHaveBeenCalledTimes(1));
+
+  firePointer(puck, "pointerdown", {
+    pointerId: 2,
+    button: 0,
+    buttons: 1,
+    clientX: 12,
+    clientY: 12,
+  });
+  firePointer(puck, "pointerup", {
+    pointerId: 2,
+    button: 0,
+    buttons: 0,
+    clientX: 12,
+    clientY: 12,
+  });
+
+  expect(client.showPanel).toHaveBeenCalledTimes(1);
+});
+
+it("does not poison the next click when native dragging fails", async () => {
+  const client = createClient();
+  vi.mocked(client.startDragging).mockRejectedValueOnce(new Error("drag unavailable"));
+  render(<Puck changeCount={0} client={client} />);
+  const puck = screen.getByRole("button", { name: "Open Git panel, no changed files" });
+
+  firePointer(puck, "pointerdown", {
+    pointerId: 3,
+    button: 0,
+    buttons: 1,
+    clientX: 5,
+    clientY: 5,
+  });
+  firePointer(puck, "pointermove", {
+    pointerId: 3,
+    buttons: 1,
+    clientX: 20,
+    clientY: 20,
+  });
+  firePointer(puck, "pointerup", {
+    pointerId: 3,
+    button: 0,
+    buttons: 0,
+    clientX: 20,
+    clientY: 20,
+  });
+  await waitFor(() => expect(client.startDragging).toHaveBeenCalledTimes(1));
+
+  fireEvent.click(puck);
+  expect(client.showPanel).toHaveBeenCalledTimes(1);
+});
+
+it("ignores stale pointer movement after the primary button is released", () => {
+  const client = createClient();
+  render(<Puck changeCount={0} client={client} />);
+  const puck = screen.getByRole("button", { name: "Open Git panel, no changed files" });
+
+  firePointer(puck, "pointerdown", {
+    pointerId: 4,
+    button: 0,
+    buttons: 1,
+    clientX: 4,
+    clientY: 4,
+  });
+  firePointer(puck, "pointermove", {
+    pointerId: 4,
+    buttons: 0,
+    clientX: 24,
+    clientY: 24,
+  });
+  fireEvent.click(puck);
+
+  expect(client.startDragging).not.toHaveBeenCalled();
+  expect(client.showPanel).toHaveBeenCalledTimes(1);
+});
+
+it("keeps repeated open requests single-flight", async () => {
+  const client = createClient();
+  let finishShowing!: () => void;
+  vi.mocked(client.showPanel).mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        finishShowing = resolve;
+      }),
+  );
+  render(<Puck changeCount={0} client={client} />);
+  const puck = screen.getByRole("button", { name: "Open Git panel, no changed files" });
+
+  fireEvent.click(puck);
+  fireEvent.click(puck);
+  expect(client.showPanel).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    finishShowing();
+    await Promise.resolve();
+  });
+  fireEvent.click(puck);
+  expect(client.showPanel).toHaveBeenCalledTimes(2);
 });

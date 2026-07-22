@@ -7,12 +7,14 @@ RepoPuck is a Windows desktop application built with Tauri 2, Rust, React, and T
 ```mermaid
 flowchart TD
     Panel["React panel"] --> Workspace["Git workspace state"]
-    Puck["React puck"] --> NativeClient["Native shell client"]
+    Puck["React puck"] --> CountClient["Lightweight change-count client"]
+    Puck --> NativeClient["Native shell client"]
     Settings["Settings dialog"] --> ShellSettings["Shell settings state"]
     Settings --> NativeClient
     Workspace --> GitClient["Typed GitClient"]
     GitClient -->|"browser"| Demo["In-memory demo client"]
     GitClient -->|"Tauri"| Invoke["Tauri invoke boundary"]
+    CountClient --> Invoke
     NativeClient --> Invoke
     ShellSettings --> Store["Tauri store"]
     Invoke --> Commands["Rust command adapters"]
@@ -37,7 +39,9 @@ The frontend lives under `src/` and owns presentation plus short-lived interacti
 | `src/features/git/tauriClient.ts` | Typed translation between `GitClient` calls and Tauri commands. |
 | `src/features/git/GitProvider.tsx` and `useGitWorkspace.ts` | Snapshot refresh, polling, message state, mutation serialization, and notices/errors. |
 | `src/features/git/` components | Change groups, rows, empty state, and commit composition. |
-| `src/features/shell/` | Panel layout, puck, header, overflow actions, settings, theme, and native-shell interaction. |
+| `src/features/shell/PanelWindow.tsx` | Native panel visibility observation, visible-only workspace lifecycle, and lazy panel loading. |
+| `src/features/shell/PuckWindow.tsx` and `puckChangeCount.ts` | Lightweight puck lifecycle and single-flight changed-file count refresh. |
+| `src/features/shell/` | Panel layout, puck gestures, header, overflow actions, settings, theme, and native-shell interaction. |
 
 UI components do not spawn Git or read the filesystem directly. Git-facing components consume workspace actions; native-shell components consume their typed native client. This separation keeps browser tests meaningful and makes native capabilities explicit.
 
@@ -60,12 +64,13 @@ The Tauri command layer should remain thin. Git decisions belong in the service,
 
 ## Repository snapshot flow
 
-1. The panel requests a refresh through the workspace state.
+1. When the panel becomes visible, it requests a refresh through the workspace state.
 2. The Tauri client invokes `get_snapshot`; the command reads the repository previously selected into managed Rust state.
 3. Rust runs stable, machine-readable Git commands against that validated repository.
 4. Porcelain and numstat parsers create a repository snapshot containing branches, ahead/behind state, and change entries.
-5. The response crosses the Tauri boundary as camel-cased JSON and replaces the frontend snapshot only if it still belongs to the active repository/client generation.
-6. Each mounted panel or puck webview performs a single-flight refresh approximately every three seconds. Hiding a native window does not currently unmount its webview, so it can continue polling while hidden. Mutations are serialized so a poll cannot race a conflicting operation.
+5. The response crosses the Tauri boundary as camel-cased JSON and replaces the frontend snapshot only if it still belongs to the active repository/client generation and differs structurally from the current snapshot.
+6. The visible panel performs a single-flight full refresh immediately and every 10 seconds. Hiding it clears that timer; showing it starts with a fresh snapshot. Mutations are serialized so a poll cannot race a conflicting operation.
+7. The puck never loads the full workspace provider. It requests a lightweight changed-file count immediately and every 30 seconds, using one porcelain-status command and a single-flight guard.
 
 ## Mutation flow
 
@@ -93,7 +98,11 @@ The submitted message is cleared only after a successful commit or Amend, and on
 
 ## Git execution and safety boundary
 
-RepoPuck launches `git` directly with `std::process::Command` and a vector of arguments. It never constructs a shell command string. On Windows, Git is created suspended and without a console window, assigned to a per-operation Job Object with kill-on-close, and only then resumed. Git stdin is closed, terminal prompting is disabled, and stdout/stderr are drained concurrently with a retained-output limit. A timeout terminates the complete Job Object process tree and hands the canceled readers to a reaper, so credential helpers or transports cannot keep the serialized repository operation locked. Commands that accept repository paths place `--` before paths and use literal pathspecs; the service also rejects any staging path that is not present in the current porcelain snapshot.
+RepoPuck launches `git` directly with `std::process::Command` and a vector of arguments. It never constructs a shell command string. Every blocking repository operation is dispatched through Tauri's blocking task pool, keeping the async command and native window event threads free while Git runs. On Windows, Git is created suspended and without a console window, assigned to a per-operation Job Object with kill-on-close, and only then resumed. Git stdin is closed, terminal prompting is disabled, and stdout/stderr are drained concurrently with a retained-output limit. A timeout terminates the complete Job Object process tree and hands the canceled readers to a reaper, so credential helpers or transports cannot keep the serialized repository operation locked. Commands that accept repository paths place `--` before paths and use literal pathspecs; the service also rejects any staging path that is not present in the current porcelain snapshot.
+
+The full snapshot obtains upstream remote/ref metadata through the existing branch enumeration command instead of issuing repeated current-branch and configuration lookups. The puck's count path intentionally omits branch, remote, and numstat metadata.
+
+At startup, recent-repository validation is also dispatched to the blocking pool. Native puck and tray setup can complete without waiting for `rev-parse`; a successful restore emits one refresh request to the webviews.
 
 Selected directories are validated with Git and canonicalized before becoming repository state. Machine-readable output is preferred (`--porcelain` and NUL-delimited records where applicable). Push, fetch, and pull receive an explicit validated tracking remote/ref (or `origin` for first push) instead of inheriting ambient `push.default` or `remote.pushDefault` behavior. Errors are converted into conservative, user-safe diagnostics; credential-bearing URLs, secrets, environment values, and unrelated process data must not cross into UI notices.
 
@@ -114,7 +123,7 @@ RepoPuck has two native surfaces:
 
 The tray owns application lifetime. Closing a surface hides it; it does not terminate the process. Explicit `Quit` from the tray menu exits. A pinned panel stays on top, while an unpinned panel can hide after losing focus.
 
-Both webviews use a restrictive production content-security policy. Capabilities are split per window: both can listen for shell events and access the non-secret settings store, only the panel can open the repository picker, and only the puck can initiate native dragging. RepoPuck does not register or expose the filesystem plugin to frontend code.
+Both webviews use a restrictive production content-security policy. Capabilities are split per window: both can listen for shell events and access the non-secret settings store, only the panel can open the repository picker and read its own native visibility, and only the puck can initiate native dragging. RepoPuck does not register or expose the filesystem plugin to frontend code.
 
 Positioning is expressed as pure geometry first and then applied through Tauri window APIs. Tests cover each monitor edge so the panel cannot open outside the available work area.
 

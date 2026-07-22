@@ -76,7 +76,10 @@ No actionable P0, P1, or P2 differences remain.
 - Clean, dark, error, success, menu, Amend, default, and minimum-size states were inspected.
 - Every final CDP capture reported no runtime exception or log event. The production WebView rendered successfully with the restrictive CSP enabled.
 - The final release ran through multiple automatic refresh cycles while a 10 ms Win32 scan detected zero visible `ConsoleWindowClass` windows.
-- Automated gates at this pass: 11 frontend files / 91 tests, 43 Rust tests, TypeScript type-check, ESLint, Rustfmt, Clippy with warnings denied, frontend production build, and debug/release MSI packaging all passed.
+- The v0.1.0 baseline launched 31 direct child Git processes during an eight-second hidden-window sample and consumed 2.109 CPU seconds. The v0.1.1 hidden-panel build launched zero direct child Git processes during a 12-second sample, consumed no measurable CPU time in that sample, remained responsive, and used 42.3 MB of working set.
+- The final v0.1.1 executable exposed its first native window 559 ms after process start while restoring the recent repository in the background. A real physical puck click showed the panel in 46 ms after the input event; a double-click left it visible. The visibility lifecycle was also sampled for 32 seconds with only 0.031 CPU seconds consumed by the process.
+- The packaged v0.1.1 dark panel and its open native branch selector were inspected at 175% Windows display scaling. Selected and unselected options retained distinct, readable foreground/background contrast.
+- Automated gates at this pass: 15 frontend files / 109 tests, 45 Rust tests, TypeScript type-check, ESLint, Rustfmt, Clippy with warnings denied, frontend production build, and release MSI packaging all passed.
 
 ## Open questions
 
@@ -90,6 +93,7 @@ No actionable P0, P1, or P2 differences remain.
 - [x] Verify success/error feedback and actual Copy details behavior.
 - [x] Verify 420 × 720, 360 × 560, clean, dark, and puck states.
 - [x] Compare source and implementation together at full-view and focused-region levels.
+- [x] Verify hidden-panel refresh suspension, native puck open latency, and dark branch-selector contrast in the packaged v0.1.1 build.
 
 ## Follow-up polish
 

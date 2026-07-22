@@ -152,15 +152,34 @@ html[data-window-view="puck"] #root {
 
 .branch-select {
   appearance: auto;
-  background: transparent;
+  background-color: var(--panel-subtle);
   border: 0;
   color: var(--panel-text);
+  color-scheme: light;
   flex: 1 1 auto;
   font: inherit;
   min-width: 0;
   min-height: var(--panel-control-height);
   outline: 0;
   padding: 8px 0;
+}
+
+[data-color-mode="dark"] .branch-select {
+  color-scheme: dark;
+}
+
+.branch-select option,
+.settings-field select option {
+  background-color: var(--panel-surface);
+  color: var(--panel-text);
+}
+
+.settings-field select {
+  color-scheme: light;
+}
+
+[data-color-mode="dark"] .settings-field select {
+  color-scheme: dark;
 }
 
 .branch-sync {

@@ -73,10 +73,14 @@ function createTestClient() {
   return client;
 }
 
-function createWrapper(client: GitClient, visible = true) {
+function createWrapper(client: GitClient, visible = true, pollIntervalMs = 3_000) {
   return function Wrapper({ children }: PropsWithChildren) {
     return (
-      <GitProvider client={client} visible={visible}>
+      <GitProvider
+        client={client}
+        visible={visible}
+        pollIntervalMs={pollIntervalMs}
+      >
         {children}
       </GitProvider>
     );
@@ -98,6 +102,31 @@ describe("useGitWorkspace", () => {
 
     expect(result.current.selectedRepository).toEqual(initialSnapshot.repository);
     expect(client.getSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves snapshot identities when refreshed data is structurally unchanged", async () => {
+    const client = createTestClient();
+    let renderCount = 0;
+    const { result } = renderHook(
+      () => {
+        renderCount += 1;
+        return useGitWorkspace();
+      },
+      { wrapper: createWrapper(client) },
+    );
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+    const firstSnapshot = result.current.snapshot;
+    const firstRepository = result.current.selectedRepository;
+    const settledRenderCount = renderCount;
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    expect(client.getSnapshot).toHaveBeenCalledTimes(2);
+    expect(result.current.snapshot).toBe(firstSnapshot);
+    expect(result.current.selectedRepository).toBe(firstRepository);
+    expect(renderCount).toBe(settledRenderCount);
   });
 
   it("treats an initial missing repository as an empty state", async () => {
@@ -420,11 +449,11 @@ describe("useGitWorkspace", () => {
     expect(result.current.busyAction).toBeNull();
   });
 
-  it("refreshes every three seconds while visible and cleans up its timer", async () => {
+  it("refreshes at the configured interval while visible and cleans up its timer", async () => {
     vi.useFakeTimers();
     const client = createTestClient();
     const { result, unmount } = renderHook(() => useGitWorkspace(), {
-      wrapper: createWrapper(client, true),
+      wrapper: createWrapper(client, true, 7_500),
     });
 
     await act(async () => Promise.resolve());
@@ -432,12 +461,35 @@ describe("useGitWorkspace", () => {
     expect(client.getSnapshot).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(3_000);
+      await vi.advanceTimersByTimeAsync(7_499);
+    });
+    expect(client.getSnapshot).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
     });
     expect(client.getSnapshot).toHaveBeenCalledTimes(2);
 
     unmount();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not load or poll while initially hidden", async () => {
+    vi.useFakeTimers();
+    const client = createTestClient();
+    const { result, unmount } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client, false, 1_000),
+    });
+
+    await act(async () => Promise.resolve());
+    expect(result.current.snapshot).toBeNull();
+    expect(client.getSnapshot).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(client.getSnapshot).not.toHaveBeenCalled();
+    unmount();
   });
 
   it("keeps slow polling refreshes single-flight", async () => {

@@ -4,7 +4,7 @@ RepoPuck is a lightweight Windows Git companion for the part of the workflow tha
 
 > Small on screen. Fast in flow.
 
-RepoPuck is currently a pre-release v0.1 project. Development happens on the `develop` branch.
+RepoPuck is currently a pre-release v0.1.1 project. Development happens on the `develop` branch.
 
 ## What v0.1 covers
 
@@ -32,6 +32,21 @@ The approved light-panel design reference remains the primary visual source:
 ![Approved RepoPuck light-panel design reference](docs/references/floating-panel-light.png)
 
 The full comparison history and responsive/state evidence are recorded in [design-qa.md](design-qa.md).
+
+## Responsiveness model
+
+RepoPuck v0.1.1 keeps native windows responsive even when Git is slow. Blocking Git work runs on Tauri's background blocking pool instead of the WebView command thread, so opening and interacting with the panel does not wait for a repository scan to finish.
+
+Startup restoration uses the same background path: the puck and tray can appear while the most recent repository is being validated, and the UI receives one refresh request when restoration succeeds.
+
+The puck and panel have deliberately different refresh paths:
+
+- The always-visible puck asks only for a lightweight changed-file count when it starts and every 30 seconds.
+- The panel requests the full repository snapshot when it becomes visible and every 10 seconds while visible.
+- Hiding the panel stops its full-snapshot timer; reopening it immediately refreshes the data.
+- Equivalent snapshots preserve their React identity, avoiding needless rerenders when the repository has not changed.
+
+Puck activation is idempotent: clicking, pressing Enter/Space, or double-clicking asks the native shell to show the panel rather than toggling it. Pointer movement becomes a window drag only after an 8 px threshold, so a failed or tiny drag cannot suppress the next click.
 
 ## GitHub login and authentication
 

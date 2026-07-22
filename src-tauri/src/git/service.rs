@@ -49,14 +49,14 @@ impl GitService {
         let cached = self.runner.run(["diff", "--numstat", "-z", "--cached"])?;
         let unstaged = self.runner.run(["diff", "--numstat", "-z"])?;
         let changes = parse_changes(&status, &cached, &unstaged).map_err(GitError::safe)?;
-        let branches = self.branches(&current_branch)?;
+        let (branches, upstream_target) = self.branches(&current_branch)?;
         let (ahead, behind) = self.ahead_behind()?;
         let repository_path = self.runner.repository();
         let name = repository_path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| repository_path.display().to_string());
-        let target_remote = if let Some(target) = self.upstream_target()? {
+        let target_remote = if let Some(target) = upstream_target {
             Some(target.name)
         } else if self.remote_exists("origin")? {
             Some("origin".to_owned())
@@ -82,6 +82,15 @@ impl GitService {
             behind,
             changes,
         })
+    }
+
+    pub fn change_count(&self) -> Result<usize, GitError> {
+        let status =
+            self.runner
+                .run(["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
+        parse_changes_with_renames(&status, &[], &[])
+            .map(|parsed| parsed.changes.len())
+            .map_err(GitError::safe)
     }
 
     pub fn current_branch(&self) -> Result<String, GitError> {
@@ -214,16 +223,30 @@ impl GitService {
         Ok(())
     }
 
-    fn branches(&self, current: &str) -> Result<Vec<BranchSummary>, GitError> {
+    fn branches(
+        &self,
+        current: &str,
+    ) -> Result<(Vec<BranchSummary>, Option<RemoteTarget>), GitError> {
         let output = self.runner.run([
             "for-each-ref",
-            "--format=%(refname:short)%00%(upstream:short)",
+            "--format=%(refname:short)%00%(upstream:short)%00%(upstream:remotename)%00%(upstream:remoteref)",
             "refs/heads",
         ])?;
+        let mut upstream_target = None;
         let mut branches = text(&output)
             .lines()
             .filter_map(|line| {
-                let (name, upstream) = line.split_once('\0')?;
+                let mut fields = line.splitn(4, '\0');
+                let name = fields.next()?;
+                let upstream = fields.next()?;
+                let remote_name = fields.next()?;
+                let merge_ref = fields.next()?;
+                if name == current && !remote_name.is_empty() && is_branch_ref(merge_ref) {
+                    upstream_target = Some(RemoteTarget {
+                        name: remote_name.to_owned(),
+                        merge_ref: merge_ref.to_owned(),
+                    });
+                }
                 Some(BranchSummary {
                     name: name.to_owned(),
                     is_current: name == current,
@@ -238,7 +261,7 @@ impl GitService {
                 upstream: None,
             });
         }
-        Ok(branches)
+        Ok((branches, upstream_target))
     }
 
     fn has_head(&self) -> Result<bool, GitError> {
@@ -451,6 +474,7 @@ mod tests {
         let service = GitService::open(&repository.path).expect("valid repository");
 
         let before = service.snapshot().expect("initial snapshot");
+        assert_eq!(service.change_count().expect("change count"), 2);
         assert!(before
             .changes
             .iter()
