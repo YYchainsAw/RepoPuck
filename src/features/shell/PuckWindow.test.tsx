@@ -12,6 +12,20 @@ const count = vi.hoisted(() => ({
 const native = vi.hoisted(() => ({
   client: {} as NativeShellClient,
 }));
+const shell = vi.hoisted(() => ({
+  current: {
+    state: {
+      mode: "puck" as "puck" | "top-island" | "top-drawer",
+      panelPhase: "hidden" as "hidden" | "opening" | "open" | "closing",
+      transitionId: null,
+      activeMonitorName: null,
+      dockCorner: null,
+    },
+    transition: null,
+    setMode: vi.fn(),
+    completeTransition: vi.fn(),
+  },
+}));
 
 vi.mock("./puckChangeCount", () => ({
   usePuckChangeCount: count.usePuckChangeCount,
@@ -21,11 +35,17 @@ vi.mock("./nativeClient", () => ({
   createNativeShellClient: () => native.client,
 }));
 
+vi.mock("./useNativeShellState", () => ({
+  useNativeShellState: () => shell.current,
+}));
+
 beforeEach(() => {
   count.refresh.mockReset();
   count.refresh.mockResolvedValue(undefined);
   count.usePuckChangeCount.mockReset();
   count.usePuckChangeCount.mockReturnValue({ changeCount: 3, refresh: count.refresh });
+  shell.current.state.mode = "puck";
+  shell.current.state.panelPhase = "hidden";
   native.client = {
     togglePanel: vi.fn().mockResolvedValue(undefined),
     setPanelPinned: vi.fn().mockResolvedValue(undefined),
@@ -59,4 +79,26 @@ it("refreshes the count from native events and unregisters on unmount", async ()
 
   rendered.unmount();
   expect(stop).toHaveBeenCalledTimes(1);
+});
+
+it("renders the top island with the same lightweight count", () => {
+  shell.current.state.mode = "top-island";
+  shell.current.state.panelPhase = "open";
+  render(<PuckWindow />);
+
+  expect(
+    screen.getByRole("button", {
+      name: "Hide RepoPuck Git panel, 3 changed files",
+    }),
+  ).toHaveAttribute("aria-expanded", "true");
+  expect(count.usePuckChangeCount).toHaveBeenCalledWith({ pollIntervalMs: 30_000 });
+});
+
+it("renders no launcher and starts no count polling in top drawer mode", () => {
+  shell.current.state.mode = "top-drawer";
+  const rendered = render(<PuckWindow />);
+
+  expect(rendered.container).toBeEmptyDOMElement();
+  expect(count.usePuckChangeCount).not.toHaveBeenCalled();
+  expect(native.client.listen).not.toHaveBeenCalled();
 });
