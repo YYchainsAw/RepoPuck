@@ -17,10 +17,56 @@ import {
 export interface GitProviderProps extends PropsWithChildren {
   client?: GitClient;
   visible?: boolean;
+  pollIntervalMs?: number;
 }
+
+const DEFAULT_POLL_INTERVAL_MS = 10_000;
 
 const getErrorMessage = (reason: unknown) =>
   reason instanceof Error ? reason.message : String(reason);
+
+const repositoriesEqual = (
+  left: RepositorySnapshot["repository"] | null,
+  right: RepositorySnapshot["repository"],
+) =>
+  left !== null &&
+  left.name === right.name &&
+  left.path === right.path &&
+  left.remoteName === right.remoteName &&
+  left.remoteUrl === right.remoteUrl;
+
+const snapshotsEqual = (
+  left: RepositorySnapshot | null,
+  right: RepositorySnapshot,
+) =>
+  left !== null &&
+  repositoriesEqual(left.repository, right.repository) &&
+  left.currentBranch === right.currentBranch &&
+  left.ahead === right.ahead &&
+  left.behind === right.behind &&
+  left.branches.length === right.branches.length &&
+  left.branches.every((branch, index) => {
+    const candidate = right.branches[index];
+    return (
+      candidate !== undefined &&
+      branch.name === candidate.name &&
+      branch.isCurrent === candidate.isCurrent &&
+      branch.upstream === candidate.upstream
+    );
+  }) &&
+  left.changes.length === right.changes.length &&
+  left.changes.every((change, index) => {
+    const candidate = right.changes[index];
+    return (
+      candidate !== undefined &&
+      change.path === candidate.path &&
+      change.kind === candidate.kind &&
+      change.staged === candidate.staged &&
+      change.untracked === candidate.untracked &&
+      change.additions === candidate.additions &&
+      change.deletions === candidate.deletions
+    );
+  });
 
 interface RefreshFlight {
   client: GitClient;
@@ -44,6 +90,7 @@ export function GitProvider({
   children,
   client: injectedClient,
   visible = true,
+  pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
 }: GitProviderProps) {
   const client = useMemo(
     () => injectedClient ?? createGitClient(),
@@ -91,8 +138,14 @@ export function GitProvider({
         try {
           const nextSnapshot = await targetClient.getSnapshot();
           if (!isCurrent()) return;
-          setSnapshot(nextSnapshot);
-          setSelectedRepository(nextSnapshot.repository);
+          setSnapshot((current) =>
+            snapshotsEqual(current, nextSnapshot) ? current : nextSnapshot,
+          );
+          setSelectedRepository((current) =>
+            repositoriesEqual(current, nextSnapshot.repository)
+              ? current
+              : nextSnapshot.repository,
+          );
           setRefreshError(null);
         } catch (reason) {
           if (!isCurrent()) return;
@@ -148,14 +201,14 @@ export function GitProvider({
 
     const timer = window.setInterval(() => {
       if (!mutationRef.current) void refresh();
-    }, 3_000);
+    }, pollIntervalMs);
     return () => {
       window.clearInterval(timer);
       if (generationRef.current === generation) {
         generationRef.current += 1;
       }
     };
-  }, [client, performRefresh, refresh, visible]);
+  }, [client, performRefresh, pollIntervalMs, refresh, visible]);
 
   const refreshAfterMutation = useCallback(
     async (
