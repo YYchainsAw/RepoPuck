@@ -119,6 +119,8 @@ pnpm tauri build
 
 Tauri prints the generated artifact paths when the command completes. Confirm those paths and test the resulting installer on Windows before distributing it; this README does not claim an installer location until release packaging has been verified.
 
+CI also performs a release MSI build on `windows-2022` using the locked pnpm dependencies. It verifies that a single non-empty MSI was created and uploads that installer as a workflow artifact for seven days. This is validation only: the workflow does not publish a GitHub Release or distribute the installer.
+
 Development installers are currently unsigned. Windows may show an **Unknown publisher** or Microsoft Defender SmartScreen warning; release code signing is not configured yet, so distribute builds with a reviewed source revision and checksum.
 
 ## Architecture at a glance

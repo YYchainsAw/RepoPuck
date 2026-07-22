@@ -90,3 +90,59 @@ jobs:
       - name: Run Rust tests
         working-directory: src-tauri
         run: cargo test --locked
+
+  windows-msi:
+    name: Windows MSI package
+    runs-on: windows-2022
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Build release MSI
+        run: pnpm tauri build --bundles msi --ci
+
+      - name: Verify MSI bundle
+        shell: pwsh
+        run: |
+          $msiFiles = @(Get-ChildItem -Path "src-tauri/target/release/bundle/msi" -Filter "*.msi" -File)
+          if ($msiFiles.Count -ne 1) {
+            throw "Expected exactly one MSI bundle, found $($msiFiles.Count)."
+          }
+          if ($msiFiles[0].Length -le 0) {
+            throw "MSI bundle is empty: $($msiFiles[0].FullName)"
+          }
+          $msiFiles | Select-Object FullName, Length
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopuck-msi-${{ github.sha }}
+          path: src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error
+          retention-days: 7
