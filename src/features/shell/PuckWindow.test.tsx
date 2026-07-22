@@ -27,7 +27,7 @@ beforeEach(() => {
   count.usePuckChangeCount.mockReset();
   count.usePuckChangeCount.mockReturnValue({ changeCount: 3, refresh: count.refresh });
   native.client = {
-    showPanel: vi.fn().mockResolvedValue(undefined),
+    togglePanel: vi.fn().mockResolvedValue(undefined),
     setPanelPinned: vi.fn().mockResolvedValue(undefined),
     savePuckPosition: vi.fn().mockResolvedValue(undefined),
     openSettings: vi.fn().mockResolvedValue(undefined),

@@ -27,7 +27,7 @@ function firePointer(
 
 function createClient(): NativeShellClient {
   return {
-    showPanel: vi.fn().mockResolvedValue(undefined),
+    togglePanel: vi.fn().mockResolvedValue(undefined),
     setPanelPinned: vi.fn().mockResolvedValue(undefined),
     savePuckPosition: vi.fn().mockResolvedValue(undefined),
     openSettings: vi.fn().mockResolvedValue(undefined),
@@ -37,27 +37,28 @@ function createClient(): NativeShellClient {
   };
 }
 
-it("shows the changed-file badge and opens the panel on click", () => {
+it("shows the changed-file badge and toggles the panel on click", () => {
   const client = createClient();
   render(<Puck changeCount={4} client={client} />);
 
   expect(screen.getByText("4")).toHaveAccessibleName("4 changed files");
-  fireEvent.click(screen.getByRole("button", { name: "Open Git panel, 4 changed files" }));
+  fireEvent.click(screen.getByRole("button", { name: "Toggle Git panel, 4 changed files" }));
 
-  expect(client.showPanel).toHaveBeenCalledTimes(1);
+  expect(client.togglePanel).toHaveBeenCalledTimes(1);
 });
 
 it.each(["Enter", " "])("keeps the launcher keyboard-focusable and opens the panel with %j", (key) => {
   const client = createClient();
   render(<Puck changeCount={0} client={client} />);
-  const puck = screen.getByRole("button", { name: "Open Git panel, no changed files" });
+  const puck = screen.getByRole("button", { name: "Toggle Git panel, no changed files" });
 
   puck.focus();
   expect(puck).toHaveFocus();
+  expect(getComputedStyle(puck).outlineOffset).toBe("-4px");
   fireEvent.keyDown(puck, { key });
   fireEvent.keyDown(puck, { key, repeat: true });
 
-  expect(client.showPanel).toHaveBeenCalledTimes(1);
+  expect(client.togglePanel).toHaveBeenCalledTimes(1);
 });
 
 it("caps a large visible badge without losing its accessible count", () => {
@@ -84,7 +85,7 @@ it("opens the native menu on right click", () => {
   const client = createClient();
   render(<Puck changeCount={0} client={client} />);
 
-  fireEvent.contextMenu(screen.getByRole("button", { name: "Open Git panel, no changed files" }));
+  fireEvent.contextMenu(screen.getByRole("button", { name: "Toggle Git panel, no changed files" }));
 
   expect(client.showPuckMenu).toHaveBeenCalledTimes(1);
 });
@@ -92,7 +93,7 @@ it("opens the native menu on right click", () => {
 it("starts native dragging after pointer movement and saves the final position", async () => {
   const client = createClient();
   render(<Puck changeCount={1} client={client} />);
-  const puck = screen.getByRole("button", { name: "Open Git panel, 1 changed file" });
+  const puck = screen.getByRole("button", { name: "Toggle Git panel, 1 changed file" });
 
   firePointer(puck, "pointerdown", {
     pointerId: 7,
@@ -118,13 +119,13 @@ it("starts native dragging after pointer movement and saves the final position",
 
   expect(client.startDragging).toHaveBeenCalledTimes(1);
   await waitFor(() => expect(client.savePuckPosition).toHaveBeenCalledTimes(1));
-  expect(client.showPanel).not.toHaveBeenCalled();
+  expect(client.togglePanel).not.toHaveBeenCalled();
 });
 
 it("opens on the next pointer gesture when native dragging produces no click", async () => {
   const client = createClient();
   render(<Puck changeCount={0} client={client} />);
-  const puck = screen.getByRole("button", { name: "Open Git panel, no changed files" });
+  const puck = screen.getByRole("button", { name: "Toggle Git panel, no changed files" });
 
   firePointer(puck, "pointerdown", {
     pointerId: 1,
@@ -163,14 +164,14 @@ it("opens on the next pointer gesture when native dragging produces no click", a
     clientY: 12,
   });
 
-  expect(client.showPanel).toHaveBeenCalledTimes(1);
+  expect(client.togglePanel).toHaveBeenCalledTimes(1);
 });
 
 it("does not poison the next click when native dragging fails", async () => {
   const client = createClient();
   vi.mocked(client.startDragging).mockRejectedValueOnce(new Error("drag unavailable"));
   render(<Puck changeCount={0} client={client} />);
-  const puck = screen.getByRole("button", { name: "Open Git panel, no changed files" });
+  const puck = screen.getByRole("button", { name: "Toggle Git panel, no changed files" });
 
   firePointer(puck, "pointerdown", {
     pointerId: 3,
@@ -195,13 +196,13 @@ it("does not poison the next click when native dragging fails", async () => {
   await waitFor(() => expect(client.startDragging).toHaveBeenCalledTimes(1));
 
   fireEvent.click(puck);
-  expect(client.showPanel).toHaveBeenCalledTimes(1);
+  expect(client.togglePanel).toHaveBeenCalledTimes(1);
 });
 
 it("ignores stale pointer movement after the primary button is released", () => {
   const client = createClient();
   render(<Puck changeCount={0} client={client} />);
-  const puck = screen.getByRole("button", { name: "Open Git panel, no changed files" });
+  const puck = screen.getByRole("button", { name: "Toggle Git panel, no changed files" });
 
   firePointer(puck, "pointerdown", {
     pointerId: 4,
@@ -219,29 +220,28 @@ it("ignores stale pointer movement after the primary button is released", () => 
   fireEvent.click(puck);
 
   expect(client.startDragging).not.toHaveBeenCalled();
-  expect(client.showPanel).toHaveBeenCalledTimes(1);
+  expect(client.togglePanel).toHaveBeenCalledTimes(1);
 });
 
-it("keeps repeated open requests single-flight", async () => {
+it("serializes repeated toggles without losing the second click", async () => {
   const client = createClient();
   let finishShowing!: () => void;
-  vi.mocked(client.showPanel).mockImplementationOnce(
+  vi.mocked(client.togglePanel).mockImplementationOnce(
     () =>
       new Promise<void>((resolve) => {
         finishShowing = resolve;
       }),
   );
   render(<Puck changeCount={0} client={client} />);
-  const puck = screen.getByRole("button", { name: "Open Git panel, no changed files" });
+  const puck = screen.getByRole("button", { name: "Toggle Git panel, no changed files" });
 
   fireEvent.click(puck);
   fireEvent.click(puck);
-  expect(client.showPanel).toHaveBeenCalledTimes(1);
+  expect(client.togglePanel).toHaveBeenCalledTimes(1);
 
   await act(async () => {
     finishShowing();
     await Promise.resolve();
   });
-  fireEvent.click(puck);
-  expect(client.showPanel).toHaveBeenCalledTimes(2);
+  expect(client.togglePanel).toHaveBeenCalledTimes(2);
 });

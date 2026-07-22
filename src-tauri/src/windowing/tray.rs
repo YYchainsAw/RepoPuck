@@ -33,7 +33,10 @@ pub fn setup(app: &App) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
             SETTINGS => {
                 let _ = super::open_settings_window(app);
             }
-            QUIT => app.exit(0),
+            QUIT => {
+                super::save_window_geometry(app);
+                app.exit(0);
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -58,14 +61,18 @@ pub fn setup(app: &App) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn tray_and_puck_clicks_both_show_the_panel() {
+    fn tray_always_shows_while_puck_toggles_the_panel() {
         assert_eq!(
             super::tray_left_click_action(),
             super::super::PanelAction::Show
         );
         assert_eq!(
-            super::super::puck_click_action(),
+            super::super::toggle_panel_action(false),
             super::super::PanelAction::Show
+        );
+        assert_eq!(
+            super::super::toggle_panel_action(true),
+            super::super::PanelAction::Hide
         );
     }
 }

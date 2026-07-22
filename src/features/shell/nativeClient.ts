@@ -8,7 +8,7 @@ export interface NativeShellListeners {
 }
 
 export interface NativeShellClient {
-  showPanel(): Promise<void>;
+  togglePanel(): Promise<void>;
   setPanelPinned(pinned: boolean): Promise<void>;
   savePuckPosition(): Promise<void>;
   openSettings(): Promise<void>;
@@ -20,7 +20,7 @@ export interface NativeShellClient {
 const isTauriRuntime = () => "__TAURI_INTERNALS__" in window;
 
 const browserClient: NativeShellClient = {
-  showPanel: async () => undefined,
+  togglePanel: async () => undefined,
   setPanelPinned: async () => undefined,
   savePuckPosition: async () => undefined,
   openSettings: async () => undefined,
@@ -32,7 +32,7 @@ const browserClient: NativeShellClient = {
 export function createNativeShellClient(): NativeShellClient {
   if (!isTauriRuntime()) return browserClient;
   return {
-    showPanel: () => invoke("show_panel"),
+    togglePanel: () => invoke("toggle_panel"),
     setPanelPinned: (pinned) => invoke("set_panel_pinned", { pinned }),
     savePuckPosition: () => invoke("save_puck_position"),
     openSettings: () => invoke("open_settings"),

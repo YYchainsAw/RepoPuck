@@ -25,19 +25,19 @@ afterEach(() => {
   Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
 });
 
-it("uses the idempotent native show command for launcher activation", async () => {
+it("uses the native toggle command for launcher activation", async () => {
   const client = createNativeShellClient();
 
-  await client.showPanel();
+  await client.togglePanel();
 
-  expect(nativeApi.invoke).toHaveBeenCalledWith("show_panel");
+  expect(nativeApi.invoke).toHaveBeenCalledWith("toggle_panel");
 });
 
 it("keeps browser preview panel activation side-effect free", async () => {
   Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
   const client = createNativeShellClient();
 
-  await client.showPanel();
+  await client.togglePanel();
 
   expect(nativeApi.invoke).not.toHaveBeenCalled();
 });

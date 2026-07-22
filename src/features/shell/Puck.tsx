@@ -24,20 +24,31 @@ const DRAG_THRESHOLD = 8;
 export function Puck({ changeCount, client: injectedClient }: PuckProps) {
   const clientRef = useRef(injectedClient ?? createNativeShellClient());
   const gesture = useRef<PointerOrigin | null>(null);
-  const showRequest = useRef<Promise<void> | null>(null);
+  const toggleRequest = useRef<Promise<void> | null>(null);
+  const togglePending = useRef(false);
   const count = Math.max(0, Math.floor(changeCount));
   const countLabel = count === 0 ? "no changed files" : `${count} changed ${count === 1 ? "file" : "files"}`;
 
-  const showPanel = () => {
-    if (showRequest.current) return;
+  const togglePanel = () => {
+    if (toggleRequest.current) {
+      // Toggle requests are stateful. Coalesce additional in-flight clicks by
+      // parity so an even number cancels out while an odd number still runs.
+      togglePending.current = !togglePending.current;
+      return;
+    }
 
     const request = clientRef.current
-      .showPanel()
+      .togglePanel()
       .catch(() => undefined)
       .finally(() => {
-        if (showRequest.current === request) showRequest.current = null;
+        if (toggleRequest.current !== request) return;
+        toggleRequest.current = null;
+        if (togglePending.current) {
+          togglePending.current = false;
+          togglePanel();
+        }
       });
-    showRequest.current = request;
+    toggleRequest.current = request;
   };
 
   const releasePointer = (
@@ -93,7 +104,7 @@ export function Puck({ changeCount, client: injectedClient }: PuckProps) {
     if (!current || current.pointerId !== event.pointerId) return;
     gesture.current = null;
     releasePointer(event, current.pointerId);
-    if (!current.dragged) showPanel();
+    if (!current.dragged) togglePanel();
   };
 
   const cancelPointer = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -106,7 +117,7 @@ export function Puck({ changeCount, client: injectedClient }: PuckProps) {
   const handleClick = (event: ReactMouseEvent<HTMLButtonElement>) => {
     // Pointer activation is handled on pointerup so a native drag cannot leave a
     // stale click-suppression flag. detail === 0 preserves assistive/programmatic clicks.
-    if (event.detail === 0) showPanel();
+    if (event.detail === 0) togglePanel();
   };
 
   return (
@@ -114,8 +125,8 @@ export function Puck({ changeCount, client: injectedClient }: PuckProps) {
       <button
         className="puck-button"
         type="button"
-        aria-label={`Open Git panel, ${countLabel}`}
-        title="Open RepoPuck"
+        aria-label={`Toggle Git panel, ${countLabel}`}
+        title="Show or hide RepoPuck"
         onPointerDown={startPointer}
         onPointerMove={movePointer}
         onPointerUp={endPointer}
@@ -124,7 +135,7 @@ export function Puck({ changeCount, client: injectedClient }: PuckProps) {
         onKeyDown={(event) => {
           if (event.repeat || (event.key !== "Enter" && event.key !== " ")) return;
           event.preventDefault();
-          showPanel();
+          togglePanel();
         }}
         onContextMenu={(event) => {
           event.preventDefault();

@@ -13,6 +13,7 @@
   cursor: pointer;
   height: 58px;
   margin: 0;
+  outline-offset: -4px;
   padding: 0;
   position: relative;
   width: 58px;
@@ -24,6 +25,10 @@
   pointer-events: none;
   user-select: none;
   width: 58px;
+}
+
+.puck-button:focus-visible {
+  border-radius: 50%;
 }
 
 .puck-badge {

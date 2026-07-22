@@ -30,6 +30,7 @@ pub fn run() {
             commands::open_terminal,
             commands::open_explorer,
             windowing::show_panel,
+            windowing::toggle_panel,
             windowing::set_panel_pinned,
             windowing::save_puck_position,
             windowing::open_settings,

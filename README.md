@@ -4,11 +4,11 @@ RepoPuck is a lightweight Windows Git companion for the part of the workflow tha
 
 > Small on screen. Fast in flow.
 
-RepoPuck is currently a pre-release v0.1.1 project. Development happens on the `develop` branch.
+RepoPuck is currently a pre-release v0.1.2 project. Development happens on the `develop` branch.
 
 ## What v0.1 covers
 
-- A 58 × 58 always-on-top puck and a compact, resizable Git panel.
+- A 58 × 58 always-on-top puck and a compact Git panel that resizes from 360 × 560 to 720 × 960.
 - Repository selection, status refresh, tracked/untracked change groups, and per-file staging.
 - Local branch switching and branch creation.
 - Separate `Commit` and `Commit & Push` actions.
@@ -31,11 +31,15 @@ The approved light-panel design reference remains the primary visual source:
 
 ![Approved RepoPuck light-panel design reference](docs/references/floating-panel-light.png)
 
+The v0.1.2 puck follows the selected docked-node direction: a full-size teal puck, graphite rim, three-node Git mark, and a small corner notch. The comparison below shows the selected source, the packaged asset, and the live 175% Windows rendering with its change-count badge.
+
+![RepoPuck v0.1.2 icon reference, packaged asset, and live rendering](docs/qa/repopuck-v012-icon-reference-vs-actual.png)
+
 The full comparison history and responsive/state evidence are recorded in [design-qa.md](design-qa.md).
 
 ## Responsiveness model
 
-RepoPuck v0.1.1 keeps native windows responsive even when Git is slow. Blocking Git work runs on Tauri's background blocking pool instead of the WebView command thread, so opening and interacting with the panel does not wait for a repository scan to finish.
+RepoPuck v0.1.2 keeps native windows responsive even when Git is slow. Blocking Git work runs on Tauri's background blocking pool instead of the WebView command thread, so opening and interacting with the panel does not wait for a repository scan to finish.
 
 Startup restoration uses the same background path: the puck and tray can appear while the most recent repository is being validated, and the UI receives one refresh request when restoration succeeds.
 
@@ -46,7 +50,9 @@ The puck and panel have deliberately different refresh paths:
 - Hiding the panel stops its full-snapshot timer; reopening it immediately refreshes the data.
 - Equivalent snapshots preserve their React identity, avoiding needless rerenders when the repository has not changed.
 
-Puck activation is idempotent: clicking, pressing Enter/Space, or double-clicking asks the native shell to show the panel rather than toggling it. Pointer movement becomes a window drag only after an 8 px threshold, so a failed or tiny drag cannot suppress the next click.
+Puck activation toggles the panel: one click opens it and the next click closes it. Toggle requests are serialized so a fast second click is not lost, while native commands never race. Pointer movement becomes a window drag only after an 8 px threshold, so a failed or tiny drag cannot suppress the next click.
+
+Before opening, native geometry evaluates all four puck corners and chooses the largest quadrant that can fully contain the current panel size. The puck overlaps the selected panel corner by 10 physical pixels, the panel stays inside the monitor work area, and a short corner-origin animation makes the relationship visible. The panel no longer closes on focus loss, so all eight edges/corners can be dragged safely. Its logical size and the docked puck position are restored across launches.
 
 ## GitHub login and authentication
 
@@ -56,7 +62,7 @@ Local operations use the `git` executable installed on your system. When a remot
 
 RepoPuck does not open an interactive credential prompt inside its compact panel. If authentication is not configured yet, complete a `git fetch` or `git push` in a terminal first, then retry the operation in RepoPuck.
 
-The app persists only non-secret preferences: theme, pin state, puck position, and a bounded recent-repository list whose first entry restores the selected repository at startup.
+The app persists only non-secret preferences: theme, pin state, puck position, panel size, and a bounded recent-repository list whose first entry restores the selected repository at startup.
 
 ## Windows prerequisites
 
