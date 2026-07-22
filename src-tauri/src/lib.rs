@@ -10,7 +10,6 @@ pub fn run() {
         .manage(commands::RepositoryState::default())
         .manage(windowing::ShellState::default())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(windowing::setup)
         .on_window_event(windowing::handle_window_event)

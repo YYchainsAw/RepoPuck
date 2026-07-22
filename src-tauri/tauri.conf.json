@@ -37,13 +37,23 @@
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
-        "focusable": false,
+        "focus": false,
+        "focusable": true,
         "skipTaskbar": true,
         "shadow": false
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self'",
+        "connect-src": "ipc: http://ipc.localhost",
+        "img-src": "'self' asset: http://asset.localhost data:",
+        "style-src": "'self' 'unsafe-inline'",
+        "font-src": "'self' data:",
+        "object-src": "'none'",
+        "base-uri": "'none'",
+        "frame-ancestors": "'none'"
+      }
     }
   },
   "bundle": {

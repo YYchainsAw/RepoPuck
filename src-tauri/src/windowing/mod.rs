@@ -290,7 +290,7 @@ fn safe_store_error(_: tauri_plugin_store::Error) -> String {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn puck_window_configuration_is_non_focusable() {
+    fn puck_window_configuration_is_focusable_for_keyboard_access() {
         let config: serde_json::Value =
             serde_json::from_str(include_str!("../../tauri.conf.json")).expect("valid config");
         let windows = config["app"]["windows"].as_array().expect("window array");
@@ -299,6 +299,18 @@ mod tests {
             .find(|window| window["label"] == "puck")
             .expect("puck window");
 
-        assert_eq!(puck["focusable"], false);
+        assert_eq!(puck["focus"], false);
+        assert_eq!(puck["focusable"], true);
+    }
+
+    #[test]
+    fn bundled_webviews_have_a_restrictive_content_security_policy() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../../tauri.conf.json")).expect("valid config");
+        let csp = &config["app"]["security"]["csp"];
+
+        assert_eq!(csp["default-src"], "'self'");
+        assert_eq!(csp["connect-src"], "ipc: http://ipc.localhost");
+        assert_eq!(csp["object-src"], "'none'");
     }
 }
