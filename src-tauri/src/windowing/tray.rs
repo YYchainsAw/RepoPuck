@@ -34,6 +34,7 @@ pub fn setup(app: &App) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
                 let _ = super::open_settings_window(app);
             }
             QUIT => {
+                super::request_drawer_shutdown(app);
                 super::save_window_geometry(app);
                 app.exit(0);
             }

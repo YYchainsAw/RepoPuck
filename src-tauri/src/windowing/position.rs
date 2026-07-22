@@ -68,14 +68,16 @@ impl Rect {
         }
     }
 
-    #[cfg(test)]
     pub fn right(self) -> i32 {
         to_i32(i64::from(self.x) + i64::from(self.width))
     }
 
-    #[cfg(test)]
     pub fn bottom(self) -> i32 {
         to_i32(i64::from(self.y) + i64::from(self.height))
+    }
+
+    pub fn contains(self, point: Point) -> bool {
+        point.x >= self.x && point.y >= self.y && point.x < self.right() && point.y < self.bottom()
     }
 }
 
@@ -283,6 +285,74 @@ pub fn restore_relative_position(relative: Point, puck: Size, work_area: Rect) -
     Point::new(to_i32(x), to_i32(y))
 }
 
+/// Centers a window along the top of a work area and clamps oversized inputs.
+pub fn top_center_position(window: Size, work_area: Rect, top_offset: u32) -> Point {
+    let work_left = i64::from(work_area.x);
+    let work_top = i64::from(work_area.y);
+    let work_right = work_left + i64::from(work_area.width);
+    let work_bottom = work_top + i64::from(work_area.height);
+    let width = i64::from(window.width);
+    let height = i64::from(window.height);
+    let centered_x = work_left + (i64::from(work_area.width) - width) / 2;
+    let desired_y = work_top + i64::from(top_offset);
+
+    Point::new(
+        to_i32(clamp(
+            centered_x,
+            work_left,
+            work_right.saturating_sub(width),
+        )),
+        to_i32(clamp(
+            desired_y,
+            work_top,
+            work_bottom.saturating_sub(height),
+        )),
+    )
+}
+
+/// Returns the usable area immediately below a top-centered anchor such as the island.
+pub fn work_area_below_anchor(work_area: Rect, anchor: Rect) -> Rect {
+    let top =
+        i64::from(anchor.bottom()).clamp(i64::from(work_area.y), i64::from(work_area.bottom()));
+    Rect::new(
+        work_area.x,
+        to_i32(top),
+        work_area.width,
+        (i64::from(work_area.bottom()) - top).max(0) as u32,
+    )
+}
+
+/// Builds the drawer activation strip at the top-center of a monitor work area.
+pub fn top_center_hot_zone(
+    work_area: Rect,
+    panel_width: u32,
+    extra_width: u32,
+    minimum_width: u32,
+    height: u32,
+) -> Rect {
+    let width = panel_width
+        .saturating_add(extra_width)
+        .max(minimum_width)
+        .min(work_area.width);
+    let position = top_center_position(Size::new(width, height), work_area, 0);
+    Rect::new(position.x, work_area.y, width, height.min(work_area.height))
+}
+
+/// Pads an interactive rectangle without overflowing integer coordinates.
+pub fn padded_rect(rect: Rect, padding: u32) -> Rect {
+    let padding = i64::from(padding);
+    let left = i64::from(rect.x) - padding;
+    let top = i64::from(rect.y) - padding;
+    let width = i64::from(rect.width) + padding.saturating_mul(2);
+    let height = i64::from(rect.height) + padding.saturating_mul(2);
+    Rect::new(
+        to_i32(left),
+        to_i32(top),
+        width.clamp(0, i64::from(u32::MAX)) as u32,
+        height.clamp(0, i64::from(u32::MAX)) as u32,
+    )
+}
+
 fn clamp(value: i64, minimum: i64, maximum: i64) -> i64 {
     value.max(minimum).min(maximum.max(minimum))
 }
@@ -294,8 +364,10 @@ fn to_i32(value: i64) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        clamp_window_position, dock_safe_panel_work_area, fit_window_inner_size, panel_placement,
-        puck_position, restore_relative_position, window_frame_size, DockCorner, Point, Rect, Size,
+        clamp_window_position, dock_safe_panel_work_area, fit_window_inner_size, padded_rect,
+        panel_placement, puck_position, restore_relative_position, top_center_hot_zone,
+        top_center_position, window_frame_size, work_area_below_anchor, DockCorner, Point, Rect,
+        Size,
     };
 
     const PANEL: Size = Size::new(420, 720);
@@ -422,5 +494,48 @@ mod tests {
         for (corner, expected) in cases {
             assert_eq!(dock_safe_panel_work_area(WORK_AREA, PUCK, corner), expected);
         }
+    }
+
+    #[test]
+    fn centers_top_surfaces_on_negative_monitor_coordinates() {
+        let work_area = Rect::new(-2_560, 48, 2_560, 1_392);
+
+        assert_eq!(
+            top_center_position(Size::new(480, 96), work_area, 16),
+            Point::new(-1_520, 64)
+        );
+        assert_eq!(
+            top_center_position(Size::new(840, 1_200), work_area, 96),
+            Point::new(-1_700, 144)
+        );
+    }
+
+    #[test]
+    fn derives_island_panel_area_below_the_visible_anchor() {
+        let work_area = Rect::new(0, 40, 1_920, 1_000);
+        let island = Rect::new(720, 48, 480, 96);
+
+        assert_eq!(
+            work_area_below_anchor(work_area, island),
+            Rect::new(0, 144, 1_920, 896)
+        );
+    }
+
+    #[test]
+    fn drawer_hot_zone_is_centered_bounded_and_contains_edge_points() {
+        let work_area = Rect::new(-1_920, -40, 1_920, 1_040);
+        let hot_zone = top_center_hot_zone(work_area, 840, 96, 560, 12);
+
+        assert_eq!(hot_zone, Rect::new(-1_428, -40, 936, 12));
+        assert!(hot_zone.contains(Point::new(-960, -40)));
+        assert!(!hot_zone.contains(Point::new(-960, -28)));
+    }
+
+    #[test]
+    fn pads_panel_hit_regions_on_virtual_desktop_coordinates() {
+        assert_eq!(
+            padded_rect(Rect::new(-800, -20, 420, 720), 12),
+            Rect::new(-812, -32, 444, 744)
+        );
     }
 }
