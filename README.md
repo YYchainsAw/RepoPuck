@@ -49,7 +49,7 @@ RepoPuck v0.1 targets Windows. To build it locally, install:
 
 - [Git for Windows](https://gitforwindows.org/) and make sure `git` is on `PATH`.
 - [Node.js](https://nodejs.org/) 22 and pnpm 10.18.3 (the versions used by CI).
-- [Rust](https://www.rust-lang.org/tools/install) stable with the MSVC toolchain.
+- [Rust](https://www.rust-lang.org/tools/install) 1.97.1 with the MSVC toolchain (the version used by CI).
 - Microsoft C++ Build Tools with **Desktop development with C++** and a Windows SDK.
 - Microsoft Edge WebView2 Runtime. It is included with supported Windows versions, but it can also be installed separately.
 - The Windows **VBSCRIPT** optional feature when building the configured MSI target. It is enabled on most installations; see Tauri's [Windows prerequisites](https://v2.tauri.app/start/prerequisites/#windows) if `light.exe` fails.
