@@ -37,7 +37,7 @@ it("requests only the native change count in Tauri", async () => {
   expect(nativeApi.invoke).toHaveBeenCalledWith("get_change_count");
 });
 
-it("polls at the configured interval and keeps overlapping refreshes single-flight", async () => {
+it("polls at the configured interval and keeps overlapping polls single-flight", async () => {
   vi.useFakeTimers();
   let finishInitial!: (count: number) => void;
   const initialCount = new Promise<number>((resolve) => {
@@ -54,13 +54,6 @@ it("polls at the configured interval and keeps overlapping refreshes single-flig
   await act(async () => Promise.resolve());
   expect(getChangeCount).toHaveBeenCalledTimes(1);
 
-  let firstRefresh!: Promise<void>;
-  let secondRefresh!: Promise<void>;
-  act(() => {
-    firstRefresh = result.current.refresh();
-    secondRefresh = result.current.refresh();
-  });
-  expect(firstRefresh).toBe(secondRefresh);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(90_000);
   });
@@ -68,7 +61,7 @@ it("polls at the configured interval and keeps overlapping refreshes single-flig
 
   await act(async () => {
     finishInitial(4);
-    await firstRefresh;
+    await initialCount;
   });
   expect(result.current.changeCount).toBe(4);
 
@@ -79,4 +72,38 @@ it("polls at the configured interval and keeps overlapping refreshes single-flig
   expect(result.current.changeCount).toBe(7);
   unmount();
   expect(vi.getTimerCount()).toBe(0);
+});
+
+it("runs one explicit follow-up count after an older count flight", async () => {
+  let finishInitial!: (count: number) => void;
+  const initialCount = new Promise<number>((resolve) => {
+    finishInitial = resolve;
+  });
+  const getChangeCount = vi
+    .fn()
+    .mockImplementationOnce(() => initialCount)
+    .mockResolvedValueOnce(7);
+  const client = { getChangeCount };
+  const { result } = renderHook(() =>
+    usePuckChangeCount({ client, pollIntervalMs: 30_000 }),
+  );
+  await act(async () => Promise.resolve());
+  expect(getChangeCount).toHaveBeenCalledTimes(1);
+
+  let firstRefresh!: Promise<void>;
+  let secondRefresh!: Promise<void>;
+  act(() => {
+    firstRefresh = result.current.refresh();
+    secondRefresh = result.current.refresh();
+  });
+  expect(firstRefresh).toBe(secondRefresh);
+  expect(getChangeCount).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    finishInitial(4);
+    await firstRefresh;
+  });
+
+  expect(getChangeCount).toHaveBeenCalledTimes(2);
+  expect(result.current.changeCount).toBe(7);
 });

@@ -16,6 +16,12 @@ interface CountFlight {
   promise: Promise<void>;
 }
 
+interface PendingCountRefresh {
+  client: PuckChangeCountClient;
+  generation: number;
+  promise: Promise<void>;
+}
+
 const DEMO_CHANGE_COUNT = 2;
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
 const isTauriRuntime = () => "__TAURI_INTERNALS__" in window;
@@ -43,9 +49,10 @@ export function usePuckChangeCount({
   const generationRef = useRef(0);
   const clientRef = useRef(client);
   const inFlightRef = useRef<CountFlight | null>(null);
+  const pendingRefreshRef = useRef<PendingCountRefresh | null>(null);
   clientRef.current = client;
 
-  const refresh = useCallback((): Promise<void> => {
+  const performRefresh = useCallback((): Promise<void> => {
     if (!mountedRef.current) return Promise.resolve();
     const generation = generationRef.current;
     const targetClient = clientRef.current;
@@ -81,18 +88,64 @@ export function usePuckChangeCount({
     return flight.promise;
   }, []);
 
+  const refresh = useCallback((): Promise<void> => {
+    if (!mountedRef.current) return Promise.resolve();
+    const generation = generationRef.current;
+    const targetClient = clientRef.current;
+    const existing = inFlightRef.current;
+    if (
+      existing?.client !== targetClient ||
+      existing.generation !== generation
+    ) {
+      return performRefresh();
+    }
+
+    const pending = pendingRefreshRef.current;
+    if (
+      pending?.client === targetClient &&
+      pending.generation === generation
+    ) {
+      return pending.promise;
+    }
+
+    const followUp = existing.promise.then(() => {
+      if (pendingRefreshRef.current?.promise === followUp) {
+        pendingRefreshRef.current = null;
+      }
+      if (
+        !mountedRef.current ||
+        clientRef.current !== targetClient ||
+        generationRef.current !== generation
+      ) {
+        return;
+      }
+      return performRefresh();
+    });
+    pendingRefreshRef.current = {
+      client: targetClient,
+      generation,
+      promise: followUp,
+    };
+    return followUp;
+  }, [performRefresh]);
+
   useEffect(() => {
     mountedRef.current = true;
     generationRef.current += 1;
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), pollIntervalMs);
+    pendingRefreshRef.current = null;
+    void performRefresh();
+    const timer = window.setInterval(
+      () => void performRefresh(),
+      pollIntervalMs,
+    );
     return () => {
       mountedRef.current = false;
       generationRef.current += 1;
       inFlightRef.current = null;
+      pendingRefreshRef.current = null;
       window.clearInterval(timer);
     };
-  }, [client, pollIntervalMs, refresh]);
+  }, [client, performRefresh, pollIntervalMs]);
 
   return { changeCount, refresh };
 }
