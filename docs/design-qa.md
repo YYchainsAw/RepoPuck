@@ -1,6 +1,9 @@
 # RepoPuck v0.2.0 design QA
 
-> Status: **local preview QA complete** for candidate `d256959`. `v0.2.0` remains unpublished; `v0.1.2` is still the stable release. GitHub Actions was not run during evidence capture and remains the required post-QA gate after a single `develop` push.
+> Status: **local shell-mode preview QA complete** for candidate `d256959`. `v0.2.0` remains unpublished; `v0.1.2` is still the stable release. GitHub Actions was not run during the original evidence capture, but the following documentation commit, [`e82e240`](https://github.com/YYchainsAw/RepoPuck/commit/e82e24067a350d92e06af65833be64a49b4048ac), subsequently passed [CI #11](https://github.com/YYchainsAw/RepoPuck/actions/runs/29917798861), including frontend, Rust, and MSI jobs. The newer game-project work through `2eaf5ca` has completed its local automated, packaging, and synthetic runtime cycle described below; it has not yet completed fresh GitHub Actions or real-editor validation.
+
+> [!IMPORTANT]
+> The game-project changes—including nested-project `selectionPath` restoration, protocol path confirmation, and index-aware Git LFS checks—are **not** part of candidate `d256959` or CI #11. Their local automated gates, packaged executable, and single-instance CLI/URI argument behavior are now recorded below. Windows protocol registration through an installed MSI and real Unity/Unreal editor launches remain release gates.
 
 ## Candidate and artifacts
 
@@ -47,7 +50,31 @@ Pure Rust geometry tests cover the calculations for 100%, mixed-DPI, and negativ
 | Rust lint | Clippy with `-D warnings` completed successfully |
 | Rust tests | 72 tests completed successfully |
 | Release packaging | EXE and MSI produced with the sizes and hashes recorded above |
-| GitHub Actions | **Not run during evidence capture.** Frontend, Rust, and Windows MSI jobs remain the post-QA gate after one `develop` push. |
+| GitHub Actions | **Not run during evidence capture.** The following `e82e240` push subsequently passed [CI #11](https://github.com/YYchainsAw/RepoPuck/actions/runs/29917798861), including frontend, Rust, and Windows MSI jobs. |
+
+## Game-project preview evidence
+
+The game-project implementation was reviewed and validated locally on 2026-07-23 through commits `8eef654`, `e7bd388`, and `2eaf5ca`.
+
+| Item | Evidence |
+| --- | --- |
+| ESLint and TypeScript | Completed successfully |
+| Vitest | 20 files, 147 tests completed successfully |
+| Rust formatting and lint | `cargo fmt --check` and Clippy with `-D warnings` completed successfully |
+| Rust tests | 131 tests completed successfully |
+| Final executable | 11,630,592 bytes; SHA-256 `A1E19528C8F2838077836D72E3CD300C52392AF459FD611D9F89DB6EB6DE53FC` |
+| Final MSI | 3,899,392 bytes; SHA-256 `90145E57EE2B09A7B97BB43DACAE0006ED97B20D1A3957562587DBC9B3009531` |
+
+A synthetic Git repository contained a nested Unity 2022.3.56f1 project and a nested Unreal 5.4 Blueprint project. The final packaged executable:
+
+- restored the nested Unity `selectionPath` while keeping Git rooted at the enclosing repository;
+- switched the already-running process to Unreal through a second `repopuck.exe open <path>` invocation;
+- switched back to Unity through a second URI argument invocation;
+- classified Unity code and scenes and Unreal Blueprint/configuration paths;
+- surfaced a staged empty-folder `.meta` as an orphan danger, a prefab without `.meta` as a missing-meta danger, and an Unreal `.uasset` as a Git LFS candidate; and
+- reported seven unique changed paths through the lightweight puck count.
+
+This smoke run exercised startup restoration, second-instance forwarding, URI parsing, nested-project mapping, snapshot refresh, and rendered game-safety UI. It did not install the MSI, invoke the URI through Windows Shell registration, import the UPM package into Unity, or compile/load the Unreal plugin. Those real integration checks remain outstanding and are not implied by the synthetic runtime evidence.
 
 ## Top Island evidence
 
@@ -124,6 +151,6 @@ No unresolved P0, P1, or P2 finding remains in this local preview QA scope.
 
 Candidate `d256959` satisfies the local packaged-app design, transition, persistence, performance, and transparent-window checks documented above. This is approval of the local `v0.2.0` preview candidate, not publication of a stable release.
 
-Before `v0.2.0` is published, push the collected changes once to `develop`, require all GitHub Actions jobs to complete successfully, and record the resulting run and final release artifact in the release notes. The unavailable hardware topologies remain declared coverage limits rather than claimed native results.
+The shell-mode follow-up push passed CI #11, and the game-project preview passed the local gates recorded above. Before `v0.2.0` is published, require a fresh GitHub Actions run, verify protocol registration from the produced MSI, complete the outstanding real Unity and Unreal editor checks, and record the final validated run and release artifact in the release notes. The unavailable hardware topologies remain declared coverage limits rather than claimed native results.
 
 final result: passed
