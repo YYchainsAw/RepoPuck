@@ -6,9 +6,9 @@ import type {
 
 const demoSnapshot: RepositorySnapshot = {
   repository: {
-    name: "repopuck",
-    path: "C:\\Projects\\repopuck",
-    remoteUrl: "https://github.com/example/repopuck.git",
+    name: "OrbitTactics",
+    path: "D:\\UnityProjects\\OrbitTactics",
+    remoteUrl: "https://github.com/example/orbit-tactics.git",
   },
   currentBranch: "develop",
   branches: [
@@ -19,20 +19,36 @@ const demoSnapshot: RepositorySnapshot = {
   behind: 0,
   changes: [
     {
-      path: "src/features/git/client.ts",
+      path: "Assets/Scripts/QuickCommitPanel.cs",
       kind: "modified",
       staged: false,
       untracked: false,
       additions: 18,
       deletions: 4,
+      gameCategory: "code",
     },
     {
-      path: "src/features/git/client.test.ts",
+      path: "Assets/Scenes/CombatArena.unity",
       kind: "added",
       staged: false,
       untracked: true,
       additions: 12,
       deletions: 0,
+      gameCategory: "scene",
+    },
+  ],
+  gameProject: {
+    name: "OrbitTactics",
+    engine: "unity",
+    version: "2022.3.56f1",
+    descriptorPath: "ProjectSettings/ProjectVersion.txt",
+  },
+  gameSafetyIssues: [
+    {
+      kind: "missing-meta",
+      severity: "danger",
+      path: "Assets/Scenes/CombatArena.unity",
+      message: "This Unity asset is missing its .meta file.",
     },
   ],
 };

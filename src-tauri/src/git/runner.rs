@@ -1,7 +1,7 @@
 use std::{
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     fmt,
-    io::{self, Read},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
     process::{Command, ExitStatus, Stdio},
     thread,
@@ -10,10 +10,13 @@ use std::{
 
 use super::process::{cancel_blocking_io, GitProcessGroup};
 
-const GIT_TIMEOUT: Duration = Duration::from_secs(30);
-const MAX_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+const GIT_READ_TIMEOUT: Duration = Duration::from_secs(30);
+const GIT_MUTATION_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const GIT_NETWORK_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 type ReaderResult = io::Result<(Vec<u8>, bool)>;
 type ReaderHandle = thread::JoinHandle<ReaderResult>;
+type WriterHandle = thread::JoinHandle<io::Result<()>>;
 
 #[derive(Clone, Debug)]
 pub struct GitRunner {
@@ -67,6 +70,28 @@ impl GitRunner {
         Ok(output.status.success().then_some(output.stdout))
     }
 
+    pub fn run_with_input<I, S>(&self, args: I, input: &[u8]) -> Result<Vec<u8>, GitError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        if input.len() > MAX_OUTPUT_BYTES {
+            return Err(GitError::safe("Git process input is too large"));
+        }
+        let output = self.command_with_input(args, Some(input))?;
+        if output.truncated {
+            return Err(GitError::output_limit());
+        }
+        if output.status.success() {
+            Ok(output.stdout)
+        } else {
+            Err(GitError::failed(
+                output.status.code(),
+                &String::from_utf8_lossy(&output.stderr),
+            ))
+        }
+    }
+
     pub fn run_with_literal_paths(
         &self,
         fixed_args: &[&str],
@@ -87,16 +112,36 @@ impl GitRunner {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
+        self.command_with_input(args, None)
+    }
+
+    fn command_with_input<I, S>(&self, args: I, input: Option<&[u8]>) -> Result<GitOutput, GitError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let args = args
+            .into_iter()
+            .map(|argument| argument.as_ref().to_os_string())
+            .collect::<Vec<_>>();
+        let timeout = timeout_for_args(&args);
         let process_group = GitProcessGroup::new().map_err(|_| GitError::isolation())?;
         let mut command = Command::new("git");
         command
             .current_dir(&self.repository)
-            .args(args)
-            .stdin(Stdio::null())
+            .args(["-c", "core.fsmonitor=false"])
+            .args(&args)
+            .stdin(if input.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .env("GIT_TERMINAL_PROMPT", "0")
-            .env("GIT_PAGER", "cat");
+            .env("GIT_PAGER", "cat")
+            .env_remove("GIT_EXTERNAL_DIFF")
+            .env_remove("GIT_DIFF_OPTS");
         process_group.prepare_command(&mut command);
         let mut child = command.spawn().map_err(|_| GitError::unavailable())?;
         if process_group.attach_and_resume(&child).is_err() {
@@ -108,7 +153,15 @@ impl GitRunner {
         let stderr = child.stderr.take().ok_or_else(GitError::unavailable)?;
         let stdout_reader = thread::spawn(move || read_limited(stdout));
         let stderr_reader = thread::spawn(move || read_limited(stderr));
-        let deadline = Instant::now() + GIT_TIMEOUT;
+        let stdin_writer = input.map(|input| {
+            let mut stdin = child
+                .stdin
+                .take()
+                .expect("piped Git stdin must be available");
+            let input = input.to_vec();
+            thread::spawn(move || stdin.write_all(&input))
+        });
+        let deadline = Instant::now() + timeout;
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break status,
@@ -116,18 +169,47 @@ impl GitRunner {
                     thread::sleep(Duration::from_millis(10));
                 }
                 Ok(None) => {
-                    stop_and_reap(&process_group, child, stdout_reader, stderr_reader);
+                    stop_and_reap(
+                        &process_group,
+                        child,
+                        stdin_writer,
+                        stdout_reader,
+                        stderr_reader,
+                    );
                     return Err(GitError::timed_out());
                 }
                 Err(_) => {
-                    stop_and_reap(&process_group, child, stdout_reader, stderr_reader);
+                    stop_and_reap(
+                        &process_group,
+                        child,
+                        stdin_writer,
+                        stdout_reader,
+                        stderr_reader,
+                    );
                     return Err(GitError::safe("Git process could not be monitored"));
                 }
             }
         };
-        if !readers_finished_before(&stdout_reader, &stderr_reader, deadline) {
-            stop_and_reap(&process_group, child, stdout_reader, stderr_reader);
+        if !io_finished_before(
+            stdin_writer.as_ref(),
+            &stdout_reader,
+            &stderr_reader,
+            deadline,
+        ) {
+            stop_and_reap(
+                &process_group,
+                child,
+                stdin_writer,
+                stdout_reader,
+                stderr_reader,
+            );
             return Err(GitError::timed_out());
+        }
+        if let Some(writer) = stdin_writer {
+            writer
+                .join()
+                .map_err(|_| GitError::safe("Git process input could not be written"))?
+                .map_err(|_| GitError::safe("Git process input could not be written"))?;
         }
         let (stdout, stdout_truncated) = join_reader(stdout_reader)?;
         let (stderr, stderr_truncated) = join_reader(stderr_reader)?;
@@ -137,6 +219,15 @@ impl GitRunner {
             stderr,
             truncated: stdout_truncated || stderr_truncated,
         })
+    }
+}
+
+fn timeout_for_args(args: &[OsString]) -> Duration {
+    let command = args.first().and_then(|argument| argument.to_str());
+    match command {
+        Some("push" | "fetch" | "pull") => GIT_NETWORK_TIMEOUT,
+        Some("add" | "restore" | "rm" | "commit" | "stash" | "switch") => GIT_MUTATION_TIMEOUT,
+        _ => GIT_READ_TIMEOUT,
     }
 }
 
@@ -170,12 +261,16 @@ fn join_reader(reader: ReaderHandle) -> Result<(Vec<u8>, bool), GitError> {
         .map_err(|_| GitError::safe("Git process output could not be read"))
 }
 
-fn readers_finished_before(
+fn io_finished_before(
+    stdin_writer: Option<&WriterHandle>,
     stdout_reader: &ReaderHandle,
     stderr_reader: &ReaderHandle,
     deadline: Instant,
 ) -> bool {
-    while !stdout_reader.is_finished() || !stderr_reader.is_finished() {
+    while stdin_writer.is_some_and(|writer| !writer.is_finished())
+        || !stdout_reader.is_finished()
+        || !stderr_reader.is_finished()
+    {
         if Instant::now() >= deadline {
             return false;
         }
@@ -187,11 +282,15 @@ fn readers_finished_before(
 fn stop_and_reap(
     process_group: &GitProcessGroup,
     mut child: std::process::Child,
+    stdin_writer: Option<WriterHandle>,
     stdout_reader: ReaderHandle,
     stderr_reader: ReaderHandle,
 ) {
     process_group.terminate();
     let _ = child.kill();
+    if let Some(writer) = &stdin_writer {
+        cancel_blocking_io(writer);
+    }
     cancel_blocking_io(&stdout_reader);
     cancel_blocking_io(&stderr_reader);
     // The job has been terminated, so all inherited writer handles are closing. Reap the
@@ -201,6 +300,9 @@ fn stop_and_reap(
         .name("repopuck-git-output-reaper".to_owned())
         .spawn(move || {
             let _ = child.wait();
+            if let Some(writer) = stdin_writer {
+                let _ = writer.join();
+            }
             let _ = stdout_reader.join();
             let _ = stderr_reader.join();
         })
@@ -419,11 +521,13 @@ fn sanitize_scp_remote(value: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
     use std::io::Cursor;
     use std::{thread, time::Duration};
 
     use super::{
-        read_limited, readers_finished_before, sanitize_remote_url, GitError, MAX_OUTPUT_BYTES,
+        io_finished_before, read_limited, sanitize_remote_url, timeout_for_args, GitError,
+        GIT_MUTATION_TIMEOUT, GIT_NETWORK_TIMEOUT, GIT_READ_TIMEOUT, MAX_OUTPUT_BYTES,
     };
 
     #[test]
@@ -443,11 +547,24 @@ mod tests {
             Ok((Vec::new(), false))
         });
 
-        assert!(!readers_finished_before(
+        assert!(!io_finished_before(
+            None,
             &stdout_reader,
             &stderr_reader,
             std::time::Instant::now() + Duration::from_millis(5)
         ));
+    }
+
+    #[test]
+    fn long_running_game_project_mutations_receive_operation_specific_timeouts() {
+        let args = |command: &str| vec![OsString::from(command)];
+
+        assert_eq!(timeout_for_args(&args("status")), GIT_READ_TIMEOUT);
+        assert_eq!(timeout_for_args(&args("add")), GIT_MUTATION_TIMEOUT);
+        assert_eq!(timeout_for_args(&args("commit")), GIT_MUTATION_TIMEOUT);
+        assert_eq!(timeout_for_args(&args("push")), GIT_NETWORK_TIMEOUT);
+        assert_eq!(timeout_for_args(&args("fetch")), GIT_NETWORK_TIMEOUT);
+        assert_eq!(timeout_for_args(&args("pull")), GIT_NETWORK_TIMEOUT);
     }
 
     #[test]

@@ -11,9 +11,16 @@ interface ChangeGroupsProps {
 
 interface ChangeGroupProps extends ChangeGroupsProps {
   title: string;
+  category?: ChangeEntry["gameCategory"];
 }
 
-function ChangeGroup({ title, changes, busy, onSetStaged }: ChangeGroupProps) {
+function ChangeGroup({
+  title,
+  category,
+  changes,
+  busy,
+  onSetStaged,
+}: ChangeGroupProps) {
   const allStaged = changes.length > 0 && changes.every((change) => change.staged);
   const someStaged = changes.some((change) => change.staged);
   const partiallyStaged = someStaged && !allStaged;
@@ -27,7 +34,11 @@ function ChangeGroup({ title, changes, busy, onSetStaged }: ChangeGroupProps) {
   }, [partiallyStaged]);
 
   return (
-    <section className="change-group" aria-label={title}>
+    <section
+      className="change-group"
+      aria-label={title}
+      data-game-category={category}
+    >
       <div className="change-group-heading">
         <input
           ref={selectAllRef}
@@ -61,6 +72,15 @@ function ChangeGroup({ title, changes, busy, onSetStaged }: ChangeGroupProps) {
 export function ChangeGroups({ changes, busy, onSetStaged }: ChangeGroupsProps) {
   const tracked = changes.filter((change) => !change.untracked || change.staged);
   const unversioned = changes.filter((change) => change.untracked && !change.staged);
+  const gameCategories = [
+    ["code", "Code"],
+    ["scene", "Scenes & Blueprints"],
+    ["asset", "Assets"],
+    ["config", "Configuration"],
+    ["generated", "Generated files"],
+    ["other", "Other changes"],
+  ] as const;
+  const gameMode = changes.some((change) => change.gameCategory !== undefined);
 
   if (changes.length === 0) {
     return (
@@ -73,14 +93,30 @@ export function ChangeGroups({ changes, busy, onSetStaged }: ChangeGroupsProps) 
 
   return (
     <div className="change-groups">
-      {tracked.length > 0 && (
-        <ChangeGroup
-          title="Changes"
-          changes={tracked}
-          busy={busy}
-          onSetStaged={onSetStaged}
-        />
-      )}
+      {gameMode
+        ? gameCategories.map(([category, title]) => {
+            const categoryChanges = tracked.filter(
+              (change) => change.gameCategory === category,
+            );
+            return categoryChanges.length > 0 ? (
+              <ChangeGroup
+                key={category}
+                title={title}
+                category={category}
+                changes={categoryChanges}
+                busy={busy}
+                onSetStaged={onSetStaged}
+              />
+            ) : null;
+          })
+        : tracked.length > 0 && (
+            <ChangeGroup
+              title="Changes"
+              changes={tracked}
+              busy={busy}
+              onSetStaged={onSetStaged}
+            />
+          )}
       {unversioned.length > 0 && (
         <ChangeGroup
           title="Unversioned files"

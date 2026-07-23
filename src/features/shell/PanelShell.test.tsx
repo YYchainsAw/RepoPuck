@@ -130,6 +130,89 @@ beforeEach(() => {
 });
 
 describe("PanelShell", () => {
+  it("shows detected game project context and safety checks above changes", () => {
+    workspace.current = createWorkspace({
+      snapshot: {
+        ...snapshot,
+        gameProject: {
+          name: "Orbit Tactics",
+          engine: "unity",
+          version: "2022.3.56f1",
+          descriptorPath: "ProjectSettings/ProjectVersion.txt",
+        },
+        gameSafetyIssues: [
+          {
+            kind: "missing-meta",
+            severity: "danger",
+            path: "Assets/Scenes/CombatArena.unity",
+            message: "This Unity asset is missing its .meta file.",
+          },
+        ],
+      },
+    });
+
+    render(<PanelShell />);
+
+    expect(screen.getByText("Orbit Tactics")).toBeInTheDocument();
+    expect(screen.getByText("Unity 2022.3.56f1")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Game project checks/ }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Missing .meta file")).toBeInTheDocument();
+  });
+
+  it("reopens danger checks when switching nested projects in one repository", () => {
+    const issue = {
+      kind: "missing-meta" as const,
+      severity: "danger" as const,
+      path: "Assets/Scenes/CombatArena.unity",
+      message: "This Unity asset is missing its .meta file.",
+    };
+    const firstSnapshot = {
+      ...snapshot,
+      repository: {
+        ...snapshot.repository,
+        selectionPath: "C:\\Projects\\studio\\Games\\First",
+      },
+      gameProject: {
+        name: "First",
+        engine: "unity" as const,
+      },
+      gameSafetyIssues: [issue],
+    };
+    workspace.current = createWorkspace({
+      snapshot: firstSnapshot,
+      selectedRepository: firstSnapshot.repository,
+    });
+    const { rerender } = render(<PanelShell />);
+    const safetyToggle = screen.getByRole("button", {
+      name: /Game project checks/,
+    });
+    fireEvent.click(safetyToggle);
+    expect(safetyToggle).toHaveAttribute("aria-expanded", "false");
+
+    const secondSnapshot = {
+      ...firstSnapshot,
+      repository: {
+        ...firstSnapshot.repository,
+        selectionPath: "C:\\Projects\\studio\\Games\\Second",
+      },
+      gameProject: {
+        name: "Second",
+        engine: "unity" as const,
+      },
+    };
+    workspace.current = createWorkspace({
+      snapshot: secondSnapshot,
+      selectedRepository: secondSnapshot.repository,
+    });
+    rerender(<PanelShell />);
+
+    expect(
+      screen.getByRole("button", { name: /Game project checks/ }),
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("removes the drawer drag control on the first close-transition event", () => {
     nativeShellState.current.state.mode = "top-drawer";
     nativeShellState.current.state.panelPhase = "open";

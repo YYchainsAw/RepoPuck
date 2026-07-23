@@ -1,6 +1,7 @@
 #![allow(linker_messages)]
 
 mod commands;
+mod game_projects;
 mod git;
 mod windowing;
 
