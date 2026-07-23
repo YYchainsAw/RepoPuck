@@ -1,0 +1,22 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0",
+  "FriendlyName": "RepoPuck Editor Bridge",
+  "Description": "Opens the current Unreal project in RepoPuck when the editor starts.",
+  "Category": "Version Control",
+  "CreatedBy": "RepoPuck",
+  "EnabledByDefault": false,
+  "CanContainContent": false,
+  "IsBetaVersion": true,
+  "Modules": [
+    {
+      "Name": "RepoPuckEditor",
+      "Type": "Editor",
+      "LoadingPhase": "PostEngineInit",
+      "PlatformAllowList": [
+        "Win64"
+      ]
+    }
+  ]
+}

@@ -62,6 +62,15 @@
       }
     }
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "repopuck"
+        ]
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["msi"],

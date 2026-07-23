@@ -151,18 +151,24 @@ pub fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         runtime.active_monitor_name = top_monitor_name;
         runtime.drawer_anchors = drawer_anchors;
     }
-    if let Some(path) = store
+    if let Some(activation) = crate::project_activation::initial_repository_activation() {
+        crate::project_activation::schedule_activation(app.handle(), activation);
+    } else if let Some(path) = store
         .get("recentRepositories")
         .and_then(|value| serde_json::from_value::<Vec<String>>(value).ok())
         .and_then(|recent| recent.into_iter().next())
+        .map(Into::into)
     {
+        let intent = app
+            .state::<crate::commands::RepositoryState>()
+            .reserve_selection();
         let app_handle = app.handle().clone();
         tauri::async_runtime::spawn_blocking(move || {
-            let restored = app_handle
-                .state::<crate::commands::RepositoryState>()
-                .restore_if_empty(path.into())
-                .unwrap_or(false);
-            if restored {
+            let repository_state = app_handle.state::<crate::commands::RepositoryState>();
+            if repository_state
+                .restore_if_empty_reserved(path, intent)
+                .unwrap_or(false)
+            {
                 let _ = request_refresh(&app_handle);
             }
         });

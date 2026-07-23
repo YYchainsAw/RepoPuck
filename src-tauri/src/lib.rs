@@ -1,18 +1,37 @@
 #![allow(linker_messages)]
 
 mod commands;
+mod external_launch;
 mod game_projects;
 mod git;
+mod project_activation;
 mod windowing;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(
+        |app, arguments, current_directory| {
+            project_activation::activate_secondary_request(app, arguments, current_directory);
+        },
+    ));
+
+    builder
         .manage(commands::RepositoryState::default())
         .manage(windowing::ShellState::default())
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
-        .setup(windowing::setup)
+        .setup(|app| {
+            windowing::setup(app)?;
+            #[cfg(all(debug_assertions, any(windows, target_os = "linux")))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                app.deep_link().register_all()?;
+            }
+            Ok(())
+        })
         .on_window_event(windowing::handle_window_event)
         .invoke_handler(tauri::generate_handler![
             commands::select_repository,
