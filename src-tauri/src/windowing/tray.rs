@@ -1,8 +1,10 @@
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    App, Wry,
+    App, AppHandle, Manager,
 };
+
+use super::i18n::{self, InterfaceLanguage};
 
 const OPEN_PANEL: &str = "open-panel";
 const REFRESH: &str = "refresh";
@@ -13,11 +15,12 @@ pub(crate) fn tray_left_click_action() -> super::PanelAction {
     super::PanelAction::Show
 }
 
-pub fn setup(app: &App) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
-    let open_panel = MenuItem::with_id(app, OPEN_PANEL, "Open panel", true, None::<&str>)?;
-    let refresh = MenuItem::with_id(app, REFRESH, "Refresh", true, None::<&str>)?;
-    let settings = MenuItem::with_id(app, SETTINGS, "Settings", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, QUIT, "Quit", true, None::<&str>)?;
+pub fn setup(app: &App) -> Result<super::PuckMenu, Box<dyn std::error::Error>> {
+    let copy = i18n::tray_copy(i18n::current_language(app.handle()));
+    let open_panel = MenuItem::with_id(app, OPEN_PANEL, copy.open_panel, true, None::<&str>)?;
+    let refresh = MenuItem::with_id(app, REFRESH, copy.refresh, true, None::<&str>)?;
+    let settings = MenuItem::with_id(app, SETTINGS, copy.settings, true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, QUIT, copy.quit, true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open_panel, &refresh, &settings, &quit])?;
     let mut builder = TrayIconBuilder::with_id("repopuck-tray")
         .tooltip("RepoPuck")
@@ -56,11 +59,31 @@ pub fn setup(app: &App) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
         builder = builder.icon(icon.clone());
     }
     builder.build(app)?;
-    Ok(menu)
+    Ok(super::PuckMenu {
+        menu,
+        open_panel,
+        refresh,
+        settings,
+        quit,
+    })
+}
+
+pub(crate) fn set_language(
+    app: &AppHandle,
+    language: InterfaceLanguage,
+) -> Result<(), tauri::Error> {
+    let copy = i18n::tray_copy(language);
+    let menu = app.state::<super::PuckMenu>();
+    menu.open_panel.set_text(copy.open_panel)?;
+    menu.refresh.set_text(copy.refresh)?;
+    menu.settings.set_text(copy.settings)?;
+    menu.quit.set_text(copy.quit)
 }
 
 #[cfg(test)]
 mod tests {
+    use super::i18n::{tray_copy, InterfaceLanguage};
+
     #[test]
     fn tray_always_shows_while_puck_toggles_the_panel() {
         assert_eq!(
@@ -74,6 +97,18 @@ mod tests {
         assert_eq!(
             super::super::toggle_panel_action(true),
             super::super::PanelAction::Hide
+        );
+    }
+
+    #[test]
+    fn tray_copy_keeps_stable_actions_in_both_languages() {
+        assert_eq!(
+            tray_copy(InterfaceLanguage::English).open_panel,
+            "Open panel"
+        );
+        assert_eq!(
+            tray_copy(InterfaceLanguage::SimplifiedChinese).open_panel,
+            "打开面板"
         );
     }
 }

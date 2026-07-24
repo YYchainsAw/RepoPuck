@@ -115,25 +115,32 @@ fn is_preapproved(app: &AppHandle, path: &Path) -> bool {
 }
 
 fn confirm_protocol_activation(app: &AppHandle, path: &Path) -> bool {
+    let copy = windowing::i18n::activation_copy(windowing::i18n::current_language(app));
     app.dialog()
         .message(format!(
-            "An external link wants RepoPuck to open this project:\n\n{}\n\nContinue only if you opened this Unity or Unreal project.",
-            path.display()
+            "{}\n\n{}\n\n{}",
+            copy.confirmation_intro,
+            path.display(),
+            copy.confirmation_guidance
         ))
-        .title("Open project in RepoPuck?")
+        .title(copy.confirmation_title)
         .kind(MessageDialogKind::Warning)
         .buttons(MessageDialogButtons::OkCancel)
         .blocking_show()
 }
 
 fn show_activation_error(app: &AppHandle, path: &Path, message: &str) {
+    let language = windowing::i18n::current_language(app);
+    let copy = windowing::i18n::activation_copy(language);
+    let detail = windowing::i18n::activation_error_detail(language, message);
     app.dialog()
         .message(format!(
-            "RepoPuck could not open this project:\n\n{}\n\n{}",
+            "{}\n\n{}\n\n{}",
+            copy.error_intro,
             path.display(),
-            message
+            detail
         ))
-        .title("Could not open project")
+        .title(copy.error_title)
         .kind(MessageDialogKind::Error)
         .buttons(MessageDialogButtons::Ok)
         .blocking_show();
