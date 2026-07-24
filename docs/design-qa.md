@@ -1,24 +1,20 @@
 # RepoPuck v0.2.0 design QA
 
-> Status: **local shell-mode preview QA complete** for candidate `d256959`. `v0.2.0` remains unpublished; `v0.1.2` is still the stable release. GitHub Actions was not run during the original evidence capture, but the following documentation commit, [`e82e240`](https://github.com/YYchainsAw/RepoPuck/commit/e82e24067a350d92e06af65833be64a49b4048ac), subsequently passed [CI #11](https://github.com/YYchainsAw/RepoPuck/actions/runs/29917798861), including frontend, Rust, and MSI jobs. The newer game-project work through `2eaf5ca` has completed its local automated, packaging, and synthetic runtime cycle described below; it has not yet completed fresh GitHub Actions or real-editor validation.
+> Status: **historical QA record for the current `v0.2.0` release**. This document preserves the local shell-mode measurements and game-project smoke evidence gathered during development. It is not the source of truth for downloadable artifacts or checksums; use the published [GitHub Release](https://github.com/YYchainsAw/RepoPuck/releases/tag/v0.2.0) for those values.
 
 > [!IMPORTANT]
-> The game-project changes—including nested-project `selectionPath` restoration, protocol path confirmation, and index-aware Git LFS checks—are **not** part of candidate `d256959` or CI #11. Their local automated gates, packaged executable, and single-instance CLI/URI argument behavior are now recorded below. Windows protocol registration through an installed MSI and real Unity/Unreal editor launches remain release gates.
+> The evidence below was collected across multiple pre-release builds and should be read as a historical validation log, not as a claim that one intermediate binary contained every later change. The synthetic game-project run covered nested-project restoration, single-instance CLI/URI activation, classification, and index-aware Git LFS checks. It did not import the optional bridges into real Unity or Unreal editor sessions; those bridges remain Beta features.
 
-## Candidate and artifacts
+## Historical QA scope
 
 | Item | Evidence |
 | --- | --- |
-| Candidate | `d256959` on `develop` |
-| Review date | 2026-07-22 |
-| Executable | `D:/VsCodeProjects/RepoPuck/src-tauri/target/release/repopuck.exe` |
-| Executable size | 11,038,208 bytes |
-| Executable SHA-256 | `5603B9A70F753481F8DB0F689C924C49903ADCF1960981FB2AE111B23F3D0F67` |
-| MSI | `D:/VsCodeProjects/RepoPuck/src-tauri/target/release/bundle/msi/RepoPuck_0.2.0_x64_en-US.msi` |
-| MSI size | 3,706,880 bytes |
-| MSI SHA-256 | `586E07B0D39DFBD50BA119D26D42FA25EEAC62DBC13245EC87FB9A265C25EAD8` |
+| Shell-mode review date | 2026-07-22 |
+| Game-project review date | 2026-07-23 |
+| Scope | Packaged Windows shell behavior, local automated gates, synthetic game-project activation, and rendered safety UI |
+| Published artifacts | See the [`v0.2.0` Release](https://github.com/YYchainsAw/RepoPuck/releases/tag/v0.2.0) |
 
-The executable and MSI size and checksum were verified from the local release artifacts before this record was finalized.
+Intermediate local paths, sizes, commit IDs, and checksums are intentionally omitted. Later icon, documentation, CI, or packaging changes can produce different binaries even when the product version is unchanged, so only the values attached to the published Release should be used for verification.
 
 ## Environment and coverage limits
 
@@ -30,7 +26,7 @@ The executable and MSI size and checksum were verified from the local release ar
 | Physical work area | 2560 × 1516 |
 | Logical work area | 1463 × 866 at 175% scaling |
 
-The packaged candidate was exercised on the single 175% display above. The following are explicitly outside this hardware evidence:
+The historical packaged shell-mode build was exercised on the single 175% display above. The following are explicitly outside this hardware evidence:
 
 - 100% display scaling: not available for a separate native run.
 - Mixed-DPI multi-monitor placement: not available on the test hardware.
@@ -49,12 +45,12 @@ Pure Rust geometry tests cover the calculations for 100%, mixed-DPI, and negativ
 | Rust formatting | `cargo fmt --check` completed successfully |
 | Rust lint | Clippy with `-D warnings` completed successfully |
 | Rust tests | 72 tests completed successfully |
-| Release packaging | EXE and MSI produced with the sizes and hashes recorded above |
-| GitHub Actions | **Not run during evidence capture.** The following `e82e240` push subsequently passed [CI #11](https://github.com/YYchainsAw/RepoPuck/actions/runs/29917798861), including frontend, Rust, and Windows MSI jobs. |
+| Release packaging | Intermediate EXE and MSI produced successfully; these were not the published Release assets |
+| GitHub Actions | Not run during the original capture; a later shell-mode follow-up passed the then-current frontend, Rust, and Windows MSI workflow |
 
-## Game-project preview evidence
+## Game-project evidence
 
-The game-project implementation was reviewed and validated locally on 2026-07-23 through commits `8eef654`, `e7bd388`, and `2eaf5ca`.
+The game-project implementation was reviewed and validated locally on 2026-07-23.
 
 | Item | Evidence |
 | --- | --- |
@@ -62,10 +58,9 @@ The game-project implementation was reviewed and validated locally on 2026-07-23
 | Vitest | 20 files, 147 tests completed successfully |
 | Rust formatting and lint | `cargo fmt --check` and Clippy with `-D warnings` completed successfully |
 | Rust tests | 131 tests completed successfully |
-| Final executable | 11,630,592 bytes; SHA-256 `A1E19528C8F2838077836D72E3CD300C52392AF459FD611D9F89DB6EB6DE53FC` |
-| Final MSI | 3,899,392 bytes; SHA-256 `90145E57EE2B09A7B97BB43DACAE0006ED97B20D1A3957562587DBC9B3009531` |
+| Packaged application | Intermediate EXE and MSI produced and exercised locally; neither is presented here as the published Release artifact |
 
-A synthetic Git repository contained a nested Unity 2022.3.56f1 project and a nested Unreal 5.4 Blueprint project. The final packaged executable:
+A synthetic Git repository contained a nested Unity 2022.3.56f1 project and a nested Unreal 5.4 Blueprint project. The historical packaged game-project build:
 
 - restored the nested Unity `selectionPath` while keeping Git rooted at the enclosing repository;
 - switched the already-running process to Unreal through a second `repopuck.exe open <path>` invocation;
@@ -91,7 +86,7 @@ Captured packaged-app evidence:
 
 ## Floating puck regression evidence
 
-The candidate still rendered the 58 × 58 logical puck as a 102 × 102 physical launcher at 175% scaling. With the shared panel open at the saved bottom-right dock, the panel measured `1730,324–2438,1391` and the puck measured `2428,1381–2530,1483`, preserving the intended corner overlap while both remained inside the work area. A second launcher activation completed in `hidden` phase and removed the native panel window without moving the puck.
+The tested build rendered the 58 × 58 logical puck as a 102 × 102 physical launcher at 175% scaling. With the shared panel open at the saved bottom-right dock, the panel measured `1730,324–2438,1391` and the puck measured `2428,1381–2530,1483`, preserving the intended corner overlap while both remained inside the work area. A second launcher activation completed in `hidden` phase and removed the native panel window without moving the puck.
 
 Captured packaged-app evidence:
 
@@ -124,7 +119,7 @@ Six consecutive expand and retract cycles were observed. The hidden baseline and
 
 `FA45C320E6DDEB1FCBB2C82CAA3E0C91D18E25AA65B0C2C58532EF2F70B635F5`
 
-No transparent rectangular residue remained after those cycles. This verifies the candidate's removal of `clip-path` from drawer closing and the disabled native shadow on the tested Windows/WebView2 environment.
+No transparent rectangular residue remained after those cycles. This verifies the tested build's removal of `clip-path` from drawer closing and the disabled native shadow on the tested Windows/WebView2 environment.
 
 ## Runtime and performance evidence
 
@@ -138,19 +133,19 @@ No transparent rectangular residue remained after those cycles. This verifies th
 
 ## Findings and fixes
 
-Static review found two release-relevant P2 issues before the final candidate:
+Static review found two release-relevant P2 issues before the historical shell-mode build was accepted:
 
-| Severity | Finding | Fix in `d256959` | Native verification |
+| Severity | Finding | Fix in the tested build | Native verification |
 | --- | --- | --- | --- |
 | P2 | Controls could remain clickable while closing, and full-window `scaleY` created a compositor-risk path. | The closing surface disables pointer interaction and removes interactive handles; the native shadow is disabled and drawer closing no longer uses `clip-path`. | The local automated suite covered the closing interaction state, re-entry recovered through transitions 11 → 13, and repeated native close cycles left no visible rectangle. |
 | P2 | The island shadow could be clipped at the bottom of its native bounds. | The launcher window is 260 × 52 while the solid surface is 260 × 48, reserving 4 px for the lower shadow. | The 455 × 91 launcher at 175% remained attached to the top edge and aligned with the panel at Y=91. |
 
-No unresolved P0, P1, or P2 finding remains in this local preview QA scope.
+No unresolved P0, P1, or P2 finding remained in this historical local QA scope.
 
-## Release decision
+## Release interpretation
 
-Candidate `d256959` satisfies the local packaged-app design, transition, persistence, performance, and transparent-window checks documented above. This is approval of the local `v0.2.0` preview candidate, not publication of a stable release.
+The historical shell-mode build satisfied the packaged-app design, transition, persistence, performance, and transparent-window checks documented above. The later game-project build passed the local automated and synthetic runtime checks recorded here. Together, this evidence supported the `v0.2.0` release without claiming that the intermediate artifacts were the published binaries.
 
-The shell-mode follow-up push passed CI #11, and the game-project preview passed the local gates recorded above. Before `v0.2.0` is published, require a fresh GitHub Actions run, verify protocol registration from the produced MSI, complete the outstanding real Unity and Unreal editor checks, and record the final validated run and release artifact in the release notes. The unavailable hardware topologies remain declared coverage limits rather than claimed native results.
+The published Release notes and GitHub Actions history are the authoritative sources for final artifact checksums and release-commit automation. Real Unity and Unreal editor bridge coverage remains an ongoing Beta validation area. The unavailable hardware topologies above remain declared coverage limits rather than claimed native results.
 
 final result: passed

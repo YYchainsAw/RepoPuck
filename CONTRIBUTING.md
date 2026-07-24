@@ -1,12 +1,12 @@
 # Contributing to RepoPuck
 
-Thanks for helping make the common Git workflow quieter and faster. RepoPuck v0.1 is intentionally narrow, so proposed changes should preserve its compact interface, safe Git boundary, and low-friction Windows experience.
+Thanks for helping make the common Git workflow quieter and faster. RepoPuck is intentionally focused, so proposed changes should preserve its compact interface, safe Git boundary, game-development awareness, and low-friction Windows experience.
 
 ## Before you start
 
-1. Read the [v0.1 design specification](docs/superpowers/specs/2026-07-20-repopuck-design.md) and [architecture guide](docs/architecture.md).
+1. Read the [current architecture guide](docs/architecture.md). The original [v0.1 design specification](docs/superpowers/specs/2026-07-20-repopuck-design.md) remains available as historical product context.
 2. Check that the change is inside the current scope. Open an issue before starting work on a large feature or a behavior that changes Git history.
-3. Install the Windows prerequisites listed in [README.md](README.md#windows-prerequisites).
+3. Install the Windows and development prerequisites listed in [README.md](README.md).
 
 ## Branch and commit workflow
 
@@ -72,7 +72,7 @@ RepoPuck delegates remote authentication to system Git. Contributions must not a
 - Keep `Commit` and `Commit & Push` as distinct actions.
 - Use GitHub Primer components/tokens and Primer Octicons; do not add handcrafted SVG icons, emoji controls, gradients, or CSS-drawn brand marks.
 - Keep common actions visible and place safe secondary actions in the overflow menu.
-- Do not add merge, rebase, cherry-pick, destructive reset, conflict editing, remote management, or history-rewriting workflows beyond the approved single-commit Amend flow to v0.1.
+- Do not add merge, rebase, cherry-pick, destructive reset, conflict editing, remote management, or history-rewriting workflows beyond the approved single-commit Amend flow without an explicit product and safety review.
 - Maintain accessible names, visible focus states, keyboard behavior, ellipsis/title handling for long paths, and usable error feedback.
 
 ## Pull requests

@@ -1,18 +1,18 @@
 # RepoPuck Unity bridge
 
-This preview, editor-only UPM package asks RepoPuck to select the current Unity project once per editor session. It does not run Git inside Unity.
+This Beta, editor-only UPM package asks RepoPuck to select the current Unity project once per editor session. It does not run Git inside Unity, and it is not required for RepoPuck's Unity detection or Git workflow.
 
 ## Requirements
 
 - Unity 2021.3 or newer.
-- An installed RepoPuck `v0.2.0` preview build, or a development build with the `repopuck` protocol registered.
+- RepoPuck `v0.2.0` or newer installed, or a development build with the `repopuck` protocol registered.
 - A local Unity project contained in a Git working tree. The Unity project may be the Git root or a nested directory inside a larger repository.
 
-The stable RepoPuck `v0.1.2` installer does not register the protocol and cannot receive bridge requests.
+Earlier releases, including `v0.1.2`, do not register the protocol and cannot receive bridge requests.
 
 ## Install from this repository
 
-1. Install and start a compatible RepoPuck preview build.
+1. Install and start RepoPuck `v0.2.0` or newer.
 2. In Unity, open **Window → Package Manager**.
 3. Choose **+ → Add package from disk**.
 4. Select [`com.repopuck.editor/package.json`](com.repopuck.editor/package.json).

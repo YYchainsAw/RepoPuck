@@ -1,18 +1,18 @@
 # RepoPuck Unreal bridge
 
-This preview, editor-only plugin asks RepoPuck to select the current Unreal project after the editor starts. It supports Blueprint-only projects and does not run Git inside Unreal.
+This Beta, editor-only plugin asks RepoPuck to select the current Unreal project after the editor starts. It supports Blueprint-only projects, does not run Git inside Unreal, and is not required for RepoPuck's Unreal detection or Git workflow.
 
 ## Requirements
 
 - Unreal Editor on Win64.
-- An installed RepoPuck `v0.2.0` preview build, or a development build with the `repopuck` protocol registered.
+- RepoPuck `v0.2.0` or newer installed, or a development build with the `repopuck` protocol registered.
 - A local Unreal project contained in a Git working tree. The Unreal project may be the Git root or a nested directory inside a larger repository.
 
-The stable RepoPuck `v0.1.2` installer does not register the protocol and cannot receive bridge requests.
+Earlier releases, including `v0.1.2`, do not register the protocol and cannot receive bridge requests.
 
 ## Install per project
 
-1. Install and start a compatible RepoPuck preview build.
+1. Install and start RepoPuck `v0.2.0` or newer.
 2. Copy [`RepoPuckEditor`](RepoPuckEditor) to `<YourProject>/Plugins/RepoPuckEditor`.
 3. In Unreal Editor, enable **RepoPuck Editor Bridge** in the Plugins window.
 4. Restart the editor and allow Unreal Build Tool to compile the editor plugin if prompted.
