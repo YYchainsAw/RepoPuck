@@ -1,0 +1,190 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: 22.14.0
+  PNPM_VERSION: 10.18.3
+  RUST_VERSION: 1.97.1
+
+jobs:
+  release:
+    name: Build and publish Windows MSI
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Validate tag and release notes
+        id: release_metadata
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          if ($tag -notmatch '^v(.+)$') {
+            throw "Expected a v-prefixed release tag, received '$tag'."
+          }
+
+          $tagVersion = $Matches[1]
+          $tauriConfig = Get-Content -LiteralPath "src-tauri/tauri.conf.json" -Raw |
+            ConvertFrom-Json
+          if ($tauriConfig.version -ne $tagVersion) {
+            throw "Tag version '$tagVersion' does not match tauri.conf.json version '$($tauriConfig.version)'."
+          }
+
+          $packageJson = Get-Content -LiteralPath "package.json" -Raw |
+            ConvertFrom-Json
+          if ($packageJson.version -ne $tagVersion) {
+            throw "Tag version '$tagVersion' does not match package.json version '$($packageJson.version)'."
+          }
+
+          $cargoManifest = Get-Content -LiteralPath "src-tauri/Cargo.toml" -Raw
+          $cargoVersionMatch = [regex]::Match(
+            $cargoManifest,
+            '(?m)^version\s*=\s*"([^"]+)"\s*$'
+          )
+          if (-not $cargoVersionMatch.Success) {
+            throw "Could not read the package version from src-tauri/Cargo.toml."
+          }
+          $cargoVersion = $cargoVersionMatch.Groups[1].Value
+          if ($cargoVersion -ne $tagVersion) {
+            throw "Tag version '$tagVersion' does not match Cargo.toml version '$cargoVersion'."
+          }
+
+          $notesPath = ".github/release-notes/$tag.md"
+          if (-not (Test-Path -LiteralPath $notesPath -PathType Leaf)) {
+            throw "Missing release notes: $notesPath"
+          }
+
+          $titleLine = Get-Content -LiteralPath $notesPath -TotalCount 1
+          if ($titleLine -notmatch '^#\s+(.+)$') {
+            throw "Release notes must start with a level-one Markdown title: $notesPath"
+          }
+
+          "notes_path=$notesPath" >> $env:GITHUB_OUTPUT
+          "release_title=$($Matches[1].Trim())" >> $env:GITHUB_OUTPUT
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Cache Rust build output
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Lint frontend
+        run: pnpm lint
+
+      - name: Type-check frontend
+        run: pnpm typecheck
+
+      - name: Test frontend
+        run: pnpm test
+
+      - name: Check Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+      - name: Lint Rust
+        working-directory: src-tauri
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test Rust
+        working-directory: src-tauri
+        run: cargo test --locked
+
+      - name: Build release MSI
+        run: pnpm tauri build --bundles msi --ci
+
+      - name: Verify MSI and generate checksums
+        id: release_assets
+        shell: pwsh
+        run: |
+          $msiFiles = @(
+            Get-ChildItem -LiteralPath "src-tauri/target/release/bundle/msi" -Filter "*.msi" -File
+          )
+          if ($msiFiles.Count -ne 1) {
+            throw "Expected exactly one MSI bundle, found $($msiFiles.Count)."
+          }
+
+          $msi = $msiFiles[0]
+          if ($msi.Length -le 0) {
+            throw "MSI bundle is empty: $($msi.FullName)"
+          }
+
+          $digest = (Get-FileHash -LiteralPath $msi.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $checksumPath = Join-Path $env:GITHUB_WORKSPACE "SHA256SUMS.txt"
+          "$digest *$($msi.Name)" |
+            Set-Content -LiteralPath $checksumPath -Encoding ascii
+
+          $sourceNotesPath = ".github/release-notes/$env:GITHUB_REF_NAME.md"
+          $generatedNotesPath = Join-Path $env:GITHUB_WORKSPACE "release-notes.generated.md"
+          $sourceNotes = Get-Content -LiteralPath $sourceNotesPath -Raw
+          $checksumSection = @(
+            ""
+            "---"
+            ""
+            "## 🔐 SHA-256 / 文件校验"
+            ""
+            "``$($msi.Name)``"
+            ""
+            "``````text"
+            $digest
+            "``````"
+            ""
+            "Use ``SHA256SUMS.txt`` to verify the downloaded MSI. / 请使用 ``SHA256SUMS.txt`` 校验下载的 MSI。"
+          ) -join [Environment]::NewLine
+          ($sourceNotes.TrimEnd() + [Environment]::NewLine + $checksumSection) |
+            Set-Content -LiteralPath $generatedNotesPath -Encoding utf8
+
+          "msi_path=$($msi.FullName)" >> $env:GITHUB_OUTPUT
+          "checksum_path=$checksumPath" >> $env:GITHUB_OUTPUT
+          "generated_notes_path=$generatedNotesPath" >> $env:GITHUB_OUTPUT
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MSI_PATH: ${{ steps.release_assets.outputs.msi_path }}
+          CHECKSUM_PATH: ${{ steps.release_assets.outputs.checksum_path }}
+          RELEASE_NOTES_PATH: ${{ steps.release_assets.outputs.generated_notes_path }}
+          RELEASE_TITLE: ${{ steps.release_metadata.outputs.release_title }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME `
+            $env:MSI_PATH `
+            $env:CHECKSUM_PATH `
+            --verify-tag `
+            --latest `
+            --title $env:RELEASE_TITLE `
+            --notes-file $env:RELEASE_NOTES_PATH
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub Release creation failed with exit code $LASTEXITCODE."
+          }
