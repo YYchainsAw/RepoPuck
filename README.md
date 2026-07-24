@@ -16,6 +16,7 @@
     <a href="https://github.com/YYchainsAw/RepoPuck/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/YYchainsAw/RepoPuck?display_name=tag&style=flat-square&color=1f883d"></a>
     <a href="https://github.com/YYchainsAw/RepoPuck/releases"><img alt="下载次数" src="https://img.shields.io/github/downloads/YYchainsAw/RepoPuck/total?style=flat-square&color=0969da"></a>
     <a href="https://github.com/YYchainsAw/RepoPuck/actions/workflows/ci.yml"><img alt="CI 状态" src="https://img.shields.io/github/actions/workflow/status/YYchainsAw/RepoPuck/ci.yml?branch=main&style=flat-square&label=CI"></a>
+    <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/github/license/YYchainsAw/RepoPuck?style=flat-square&color=8250df"></a>
     <img alt="Windows 10 和 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0969da?style=flat-square&logo=windows11&logoColor=white">
   </p>
 
@@ -313,7 +314,9 @@ RepoPuck 的界面语言建立在 [GitHub Primer](https://primer.style/) 与 [Oc
 
 ## 📄 License
 
-本项目尚未选定开源许可证，当前由仓库所有者保留所有权利。在许可证正式加入仓库之前，请勿假定你拥有复制、修改、分发或再许可本项目的权利。
+RepoPuck 采用 [MIT License](LICENSE) 开源。你可以按照许可证条款自由使用、复制、修改、合并、发布和分发本项目。
+
+Copyright © 2026 YYchainsAw.
 
 ---
 

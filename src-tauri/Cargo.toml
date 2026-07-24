@@ -4,6 +4,7 @@ version = "0.2.0"
 description = "A tray-first Git client for Windows"
 authors = ["RepoPuck"]
 edition = "2021"
+license = "MIT"
 
 [lib]
 name = "repopuck_lib"
