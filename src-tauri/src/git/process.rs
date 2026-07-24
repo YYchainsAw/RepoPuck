@@ -205,7 +205,9 @@ mod platform {
                 .attach_and_resume(&child)
                 .expect("assign and resume command");
             let mut stdout = child.stdout.take().expect("take stdout");
-            let root_deadline = Instant::now() + Duration::from_secs(3);
+            // PowerShell startup on shared CI runners can be delayed by cold .NET/AMSI startup.
+            // This deadline protects against a deadlock; it is not a process-startup benchmark.
+            let root_deadline = Instant::now() + Duration::from_secs(15);
             let root_status = loop {
                 if let Some(status) = child.try_wait().expect("monitor root command") {
                     break status;

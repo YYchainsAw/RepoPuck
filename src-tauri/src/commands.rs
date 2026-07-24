@@ -453,15 +453,18 @@ mod tests {
             .join()
             .expect("first thread")
             .expect("first operation");
+        // Git process startup can be delayed when the full Windows test suite runs in parallel.
+        // Keep a generous deadlock guard without treating runner scheduling as a performance test.
+        let completion_timeout = Duration::from_secs(15);
         second_entered_rx
-            .recv_timeout(Duration::from_secs(2))
+            .recv_timeout(completion_timeout)
             .expect("second operation entered after release");
         second
             .join()
             .expect("second thread")
             .expect("second operation");
         selection_done_rx
-            .recv_timeout(Duration::from_secs(2))
+            .recv_timeout(completion_timeout)
             .expect("selection finished after release")
             .expect("select replacement repository");
         selecting.join().expect("selection thread");
