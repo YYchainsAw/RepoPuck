@@ -2,7 +2,7 @@
 
 RepoPuck is a Windows desktop application built with Tauri 2, Rust, React, and TypeScript. Its main architectural rule is simple: React describes user intent and renders the current state, while Rust owns repository validation, external project activation, Git processes, game-project analysis, shell-mode state, native windows, monitor geometry, and persistence of native placement.
 
-> Version boundary: `v0.1.2` is the stable floating-puck release. This document describes the `v0.2.0` architecture currently implemented on `develop`, including the island and drawer modes plus the Unity/Unreal game-project workflow. The shell-mode baseline has local evidence in [`docs/design-qa.md`](design-qa.md) and passed [CI #11](https://github.com/YYchainsAw/RepoPuck/actions/runs/29917798861); the newer game-project additions remain preview work until their own packaged-app and real-editor validation is complete.
+> Version boundary: `v0.1.2` is the stable floating-puck release. This document describes the architecture currently implemented on `develop`, including the `v0.2.0` island, drawer, and Unity/Unreal workflow plus the optional AI commit-message work developed afterward. The shell-mode baseline has local evidence in [`docs/design-qa.md`](design-qa.md) and passed [CI #11](https://github.com/YYchainsAw/RepoPuck/actions/runs/29917798861); newer additions remain preview work until their own packaged-app validation is complete.
 
 The application keeps one Git panel and one launcher WebView. The three shell modes change how those two native surfaces are configured; they do not create three separate Git interfaces:
 
@@ -50,6 +50,13 @@ flowchart TD
     GameAnalysis --> GameUI
     GitService --> Git["System git executable"]
     Git --> Auth["Git Credential Manager or SSH"]
+
+    Workspace --> AIClient["AI commit draft action"]
+    AIClient --> Invoke
+    Commands --> AIService["Rust AI boundary"]
+    GitService -->|"bounded staged diff"| AIService
+    AIService --> CredentialManager["Windows Credential Manager"]
+    AIService --> Provider["User-configured OpenAI-compatible service"]
 ```
 
 The browser demo and packaged application share the same React components. The deterministic demo client never touches a real repository. The packaged application selects the Tauri client at runtime and uses `?view=panel` or `?view=puck` to select the role of each WebView.
@@ -163,14 +170,14 @@ The frontend lives under `src/` and owns presentation plus short-lived interacti
 | `src/features/shell/PuckWindow.tsx`, `Puck.tsx`, and `TopIsland.tsx` | Reuse the launcher WebView for puck and island modes, toggle the panel, and run only the lightweight change-count lifecycle. |
 | `src/features/shell/PanelWindow.tsx` | Observe `PanelPhase`, host mode-specific open/close motion, keep Git polling tied to visibility, expose resize handles, and lazy-load the panel UI. |
 | `src/features/shell/PanelShell.tsx` and `DrawerDragHandle.tsx` | Provide one shared Git interface for all three modes, insert game-project context above the change list when detected, and expose the drawer-only native drag affordance without duplicating the workspace. |
-| `src/features/shell/SettingsDialog.tsx` | Select `puck`, `top-island`, or `top-drawer` and edit theme, pin, and recent-repository preferences. |
+| `src/features/shell/SettingsDialog.tsx` | Select the shell mode; edit theme, pin, recent repositories, and non-secret AI preferences; save or remove the AI key through dedicated native commands without reading it back. |
 | `src/features/game/` | Render the Unity/Unreal project banner and accessible, collapsible safety summary for the risk records supplied by Rust. |
 | `src/features/git/ChangeGroups.tsx` | Keep generic repositories split into tracked and unversioned changes; for detected game projects, split tracked or staged paths into semantic engine categories while preserving unversioned files as their own group. |
-| `src/features/git/types.ts` | Define JSON-compatible repository, branch, change, game-project, risk, and operation types. |
+| `src/features/git/types.ts` | Define JSON-compatible repository, branch, change, game-project, risk, AI-generation, and operation types. |
 | `src/features/git/client.ts` | Define the `GitClient` contract and runtime client selection. |
 | `src/features/git/demoClient.ts` | Provide in-memory behavior for browser development and deterministic tests. |
 | `src/features/git/tauriClient.ts` | Translate typed `GitClient` calls into Tauri commands. |
-| `src/features/git/GitProvider.tsx` and `useGitWorkspace.ts` | Manage snapshot refresh, polling, mutation serialization, drafts, and notices or errors. |
+| `src/features/git/GitProvider.tsx` and `useGitWorkspace.ts` | Manage snapshot refresh, polling, mutation serialization, editable drafts, stale AI-response rejection, and notices or errors. |
 
 Each WebView has its own `NativeShellStateProvider`. The provider subscribes before accepting a one-time state query, tracks event revisions to prevent a slower query from overwriting a newer event, and normalizes every payload at the boundary. Mode changes are read back from Rust rather than applied optimistically in React.
 
@@ -182,6 +189,7 @@ The native code lives under `src-tauri/src/`.
 
 | Area | Responsibility |
 | --- | --- |
+| `ai.rs` | Validate AI settings, access the per-user Windows credential, call the configured Chat Completions endpoint, sanitize its response, and assemble the final Conventional Commit locally. |
 | `commands.rs` | Tauri command boundary, shared repository state, blocking-task dispatch, and serializable responses. |
 | `external_launch.rs` | Pure parsing and validation for CLI and `repopuck://open` repository requests. |
 | `project_activation.rs` | Startup precedence, caller-relative CLI resolution, protocol-path confirmation, selection-intent ordering, recent-list persistence, and refresh signaling. |
@@ -189,7 +197,7 @@ The native code lives under `src-tauri/src/`.
 | `git/process.rs` | Windows no-console suspended start, Job Object ownership, process-tree termination, and reader cancellation. |
 | `git/runner.rs` | Bounded, non-interactive orchestration of the system `git` binary, stdin batches, and output readers, including literal path batches after `--`. |
 | `git/parser.rs` | Pure parsing for porcelain status and numstat data. |
-| `git/service.rs` | Repository validation, nested game selection, staging, committing, pushing, branches, safe secondary operations, index-blob analysis, and staged/working-tree LFS resolution. |
+| `git/service.rs` | Repository validation, nested game selection, staging, committing, pushing, branches, safe secondary operations, index-blob analysis, staged/working-tree LFS resolution, and bounded staged-diff collection for AI. |
 | `git/model.rs` | Rust models matching the TypeScript snapshot, including optional `selectionPath`, game profiles, per-change categories, and safety issues. |
 | `windowing/state.rs` | `ShellMode`, `PanelPhase`, transition IDs, reversible intents, drawer dwell/leave tracking, and per-monitor normalized anchors. |
 | `windowing/drawer.rs` | Windows cursor polling, anchor-following per-monitor hot-zone detection, foreground ownership checks, and main-thread drawer intents. |
@@ -297,6 +305,21 @@ The full snapshot obtains upstream remote and ref metadata through existing bran
 
 The current command surface covers repository selection and status, staging, committing, guarded single-commit amend, pushing with upstream setup, local branch switching and creation, fetch, pull, stash, and opening the repository in Explorer or a terminal. Game-project checks add advice to the snapshot but do not add a privileged mutation path. Amend requires confirmation and never triggers an automatic or forced push. Merge, rebase, cherry-pick, destructive reset, conflict editing, remote management, and broader history rewriting remain outside the current safety boundary.
 
+## AI commit-message flow and security boundary
+
+AI generation is an optional draft action, not a commit action. The user stages files, chooses a language, Conventional Commit type, optional scope, endpoint, and model, then explicitly selects **Generate**. The frontend sends only those non-secret preferences to `generate_commit_message`; the Rust command obtains the API key internally and returns only the generated message plus truncation and exclusion metadata. A successful response fills the editable 72-character draft and never invokes Commit or Push.
+
+The native path applies these boundaries:
+
+1. The API key is written as a generic, current-user Windows credential under the RepoPuck target. The UI can query only whether a key exists; no command returns its value.
+2. `GitService` reads only the Git index. It rejects an empty staged set, excludes known sensitive paths (including both sides of a rename), omits binary bodies, redacts common credential-bearing lines, and caps selection at 200 files, 12 KiB of literal pathspecs, and 64 KiB of retained context.
+3. Staged paths are passed to Git as literal pathspec arguments after `--`. An empty or oversized selection fails closed instead of falling back to an unscoped diff.
+4. Repository locking ends after context collection. The network request does not hold the Git mutex, and the selection generation is checked before and after the request so a response from an older repository is rejected.
+5. The configured base URL must use HTTPS, except for loopback HTTP used by local services. Credentials in URLs are rejected, redirects are disabled, the request has a 30-second timeout, and provider response bodies never appear in errors.
+6. The staged diff is labelled as untrusted data in the system instruction. The provider supplies only a subject; Rust validates the requested type and scope, removes an accidental model-supplied prefix, normalizes one line, truncates it, and assembles `type(scope): subject` locally.
+
+Non-secret endpoint and formatting preferences use the ordinary Tauri store. Closing the settings dialog clears any unsaved key from React state. Replacing or removing a credential is explicit, and the browser demo never exposes native key controls.
+
 ## Remote authentication
 
 RepoPuck has no GitHub sign-in flow. When Git contacts a remote, the system `git` process uses the credential helper or SSH configuration that the same user already uses in a terminal. RepoPuck does not receive or persist GitHub tokens, passwords, SSH private keys, or credential-helper payloads.
@@ -339,10 +362,11 @@ The Tauri store contains only local convenience settings:
 - `topSurfaceMonitorName`: the preferred monitor for the island and drawer.
 - `drawerAnchors`: finite normalized horizontal drawer positions keyed independently by monitor identity.
 - `recentRepositories`: a bounded list whose first entry may be restored at startup. For a game project nested below its Git root, the remembered value is the project `selectionPath`, preserving both protocol preapproval and game-aware detection across restarts.
+- `aiCommit`: the non-secret AI Base URL, model name, output language, Conventional Commit type, and optional scope.
 
 The old single `panelSize` value is read only as a migration fallback for puck mode. Each new mode keeps its own size so resizing the drawer does not unexpectedly reshape the puck or island panel.
 
-The store must never contain remote passwords, access tokens, SSH keys, Git credential material, commit content, repository file content, or cursor history.
+The store must never contain remote passwords, AI API keys, access tokens, SSH keys, Git credential material, commit content, repository file content, or cursor history. The optional AI key is held separately by Windows Credential Manager.
 
 ## Native lifecycle
 
@@ -356,9 +380,9 @@ An unpinned puck-mode panel remains open on focus loss so native edge resizing i
 
 ## Testing layers
 
-- **Pure Rust tests** cover Git output parsing, argument construction, URL sanitization, CLI/deep-link request parsing and path restrictions, game root detection, semantic classification, Unity `.meta` logic, canonical LFS-pointer parsing, large/LFS thresholds, shell-state transitions, stale completion rejection, drawer dwell and leave timing, and placement geometry.
-- **Temporary-repository Rust tests** exercise validation, nested `selectionPath` behavior, staging, unstaging, commits, branch state, upstream-push decisions, Unity snapshot enrichment, Unreal detection, staged index sizes and pointers, and effective staged/working-tree Git LFS attributes without touching a real user project.
-- **Vitest and Testing Library** cover client contracts, workspace concurrency and lifecycle, game grouping, game banner and safety-panel accessibility, shell-state normalization, provider event ordering, mode selection, panel transitions, launcher behavior, accessibility names, and settings.
+- **Pure Rust tests** cover Git output parsing, argument construction, URL and AI-request validation, response normalization, secret-line redaction, CLI/deep-link request parsing and path restrictions, game root detection, semantic classification, Unity `.meta` logic, canonical LFS-pointer parsing, large/LFS thresholds, shell-state transitions, stale completion rejection, drawer dwell and leave timing, and placement geometry.
+- **Temporary-repository Rust tests** exercise validation, nested `selectionPath` behavior, staging, unstaging, commits, branch state, upstream-push decisions, Unity snapshot enrichment, Unreal detection, staged AI-context bounds and sensitive rename exclusion, staged index sizes and pointers, and effective staged/working-tree Git LFS attributes without touching a real user project.
+- **Vitest and Testing Library** cover client contracts, workspace concurrency and lifecycle, AI-generation cancellation and draft replacement, secure-key UI states, settings persistence, game grouping, game banner and safety-panel accessibility, shell-state normalization, provider event ordering, mode selection, panel transitions, launcher behavior, and accessibility names.
 - **Manual browser-demo smoke checks** exercise the in-memory Git client without touching a repository.
 - **Native smoke tests and visual QA** cover launcher and panel windows, tray behavior, all three modes, rapid transition reversal, placement, persistence, and light/dark states on the available Windows display hardware. Mixed-DPI and negative-coordinate calculations remain deterministic Rust coverage until matching physical hardware is recorded.
 
