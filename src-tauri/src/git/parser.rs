@@ -93,6 +93,7 @@ pub(crate) fn parse_changes_with_renames(
                 untracked: true,
                 additions: 0,
                 deletions: 0,
+                game_category: None,
             });
             continue;
         }
@@ -149,6 +150,7 @@ fn change_entry(
         untracked,
         additions: stat.and_then(|value| value.additions).unwrap_or_default(),
         deletions: stat.and_then(|value| value.deletions).unwrap_or_default(),
+        game_category: None,
     }
 }
 

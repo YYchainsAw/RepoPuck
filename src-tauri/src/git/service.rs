@@ -1,6 +1,12 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
+    fs,
     path::{Path, PathBuf},
+};
+
+use crate::game_projects::{
+    classify_path, detect_game_project, detect_unity_meta_risks_with_index, file_risks, GameEngine,
+    GameProjectRisk, ProjectRiskKind, ProjectRiskSeverity,
 };
 
 use super::{
@@ -12,6 +18,7 @@ use super::{
 #[derive(Clone, Debug)]
 pub struct GitService {
     runner: GitRunner,
+    game_project_root: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,25 +27,35 @@ struct RemoteTarget {
     merge_ref: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct IndexBlob {
+    oid: String,
+    size: u64,
+}
+
 impl GitService {
     pub fn open(path: &Path) -> Result<Self, GitError> {
         if !path.is_dir() {
             return Err(invalid_repository());
         }
-        let runner = GitRunner::new(path);
-        let inside = runner.run(["rev-parse", "--is-inside-work-tree"])?;
+        let requested_canonical = path.canonicalize().map_err(|_| invalid_repository())?;
+        let probe = GitRunner::new(path);
+        let inside = probe.run(["rev-parse", "--is-inside-work-tree"])?;
         if text(&inside).trim() != "true" {
             return Err(invalid_repository());
         }
-        let top_level = runner.run(["rev-parse", "--show-toplevel"])?;
-        let selected = path.canonicalize().map_err(|_| invalid_repository())?;
-        let root = PathBuf::from(text(&top_level).trim())
-            .canonicalize()
+        let top_level = probe.run(["rev-parse", "--show-toplevel"])?;
+        let root = PathBuf::from(text(&top_level).trim());
+        let root_canonical = root.canonicalize().map_err(|_| invalid_repository())?;
+        let relative = requested_canonical
+            .strip_prefix(&root_canonical)
             .map_err(|_| invalid_repository())?;
-        if selected != root {
-            return Err(invalid_repository());
-        }
-        Ok(Self { runner })
+        let requested = root.join(relative);
+        let game_project_root = find_game_project_root(&requested, &root);
+        Ok(Self {
+            runner: GitRunner::new(&root),
+            game_project_root,
+        })
     }
 
     pub fn snapshot(&self) -> Result<RepositorySnapshot, GitError> {
@@ -46,9 +63,18 @@ impl GitService {
         let status =
             self.runner
                 .run(["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
-        let cached = self.runner.run(["diff", "--numstat", "-z", "--cached"])?;
-        let unstaged = self.runner.run(["diff", "--numstat", "-z"])?;
-        let changes = parse_changes(&status, &cached, &unstaged).map_err(GitError::safe)?;
+        let cached = self.runner.run([
+            "diff",
+            "--numstat",
+            "-z",
+            "--cached",
+            "--no-ext-diff",
+            "--no-textconv",
+        ])?;
+        let unstaged =
+            self.runner
+                .run(["diff", "--numstat", "-z", "--no-ext-diff", "--no-textconv"])?;
+        let mut changes = parse_changes(&status, &cached, &unstaged).map_err(GitError::safe)?;
         let (branches, upstream_target) = self.branches(&current_branch)?;
         let (ahead, behind) = self.ahead_behind()?;
         let repository_path = self.runner.repository();
@@ -68,11 +94,32 @@ impl GitService {
             .map(|remote| self.remote_url(remote))
             .transpose()?
             .flatten();
+        let game_project_root = self.game_project_root.as_deref().unwrap_or(repository_path);
+        let mut game_project = detect_game_project(game_project_root).ok().flatten();
+        if let Some(profile) = &mut game_project {
+            profile.descriptor_path = profile.descriptor_path.as_deref().map(|descriptor| {
+                repository_game_path(repository_path, game_project_root, descriptor)
+            });
+            for change in &mut changes {
+                change.game_category = Some(
+                    game_relative_path(repository_path, game_project_root, &change.path)
+                        .map(|path| classify_path(profile.engine, path))
+                        .unwrap_or(crate::game_projects::FileCategory::Other),
+                );
+            }
+        }
+        let game_safety_issues = if let Some(profile) = &game_project {
+            self.game_safety_issues(profile.engine, game_project_root, &changes)?
+        } else {
+            Vec::new()
+        };
 
         Ok(RepositorySnapshot {
             repository: RepositoryInfo {
                 name,
                 path: repository_path.display().to_string(),
+                selection_path: (self.selection_path() != repository_path)
+                    .then(|| self.selection_path().display().to_string()),
                 remote_name: target_remote,
                 remote_url,
             },
@@ -81,6 +128,8 @@ impl GitService {
             ahead,
             behind,
             changes,
+            game_project,
+            game_safety_issues,
         })
     }
 
@@ -89,7 +138,14 @@ impl GitService {
             self.runner
                 .run(["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
         parse_changes_with_renames(&status, &[], &[])
-            .map(|parsed| parsed.changes.len())
+            .map(|parsed| {
+                parsed
+                    .changes
+                    .into_iter()
+                    .map(|change| change.path)
+                    .collect::<HashSet<_>>()
+                    .len()
+            })
             .map_err(GitError::safe)
     }
 
@@ -213,6 +269,330 @@ impl GitService {
 
     pub fn repository_path(&self) -> &Path {
         self.runner.repository()
+    }
+
+    pub fn selection_path(&self) -> &Path {
+        self.game_project_root
+            .as_deref()
+            .unwrap_or_else(|| self.runner.repository())
+    }
+
+    fn game_safety_issues(
+        &self,
+        engine: GameEngine,
+        game_project_root: &Path,
+        changes: &[super::model::ChangeEntry],
+    ) -> Result<Vec<GameProjectRisk>, GitError> {
+        let repository_root = self.runner.repository();
+        let scoped_changes = changes
+            .iter()
+            .filter_map(|change| {
+                game_relative_path(repository_root, game_project_root, &change.path)
+                    .map(|relative| (change, relative))
+            })
+            .collect::<Vec<_>>();
+        if scoped_changes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let changed_paths = scoped_changes
+            .iter()
+            .map(|(_, relative)| relative.clone())
+            .collect::<Vec<_>>();
+        let selected_paths = scoped_changes
+            .iter()
+            .filter(|(change, _)| change.staged)
+            .map(|(_, relative)| relative.clone())
+            .collect::<Vec<_>>();
+        let mut index_candidate_paths = scoped_changes
+            .iter()
+            .map(|(change, _)| change.path.clone())
+            .collect::<Vec<_>>();
+        if engine == GameEngine::Unity {
+            let changed_keys = changed_paths
+                .iter()
+                .map(|path| path.replace('\\', "/").to_lowercase())
+                .collect::<HashSet<_>>();
+            for (_, relative) in &scoped_changes {
+                let normalized = relative.replace('\\', "/");
+                if !normalized.to_lowercase().starts_with("assets/") {
+                    continue;
+                }
+                if let Some(asset_relative) = strip_meta_suffix(&normalized) {
+                    if changed_keys.contains(&asset_relative.to_lowercase()) {
+                        continue;
+                    }
+                    let repository_asset =
+                        repository_game_path(repository_root, game_project_root, asset_relative);
+                    // A Unity folder has no index entry of its own. A literal directory
+                    // path asks ls-files for its indexed descendants, allowing commit-time
+                    // pairing without trusting an ignored directory left in the worktree.
+                    index_candidate_paths.push(repository_asset);
+                } else {
+                    index_candidate_paths.push(repository_game_path(
+                        repository_root,
+                        game_project_root,
+                        &format!("{normalized}.meta"),
+                    ));
+                }
+            }
+        }
+        let index_entries = self.index_entries(&index_candidate_paths)?;
+        let mut issues = if engine == GameEngine::Unity {
+            let index_paths = index_entries
+                .keys()
+                .filter_map(|path| game_relative_path(repository_root, game_project_root, path))
+                .collect::<HashSet<_>>();
+            detect_unity_meta_risks_with_index(
+                game_project_root,
+                &changed_paths,
+                &selected_paths,
+                &index_paths,
+            )
+            .into_iter()
+            .map(|mut issue| {
+                issue.path = repository_game_path(repository_root, game_project_root, &issue.path);
+                issue
+            })
+            .collect()
+        } else {
+            Vec::new()
+        };
+        let staged_paths = scoped_changes
+            .iter()
+            .filter(|(change, _)| change.staged && change.kind != super::model::ChangeKind::Deleted)
+            .map(|(change, _)| change.path.clone())
+            .collect::<Vec<_>>();
+        let index_blobs = self.index_blobs(&staged_paths, &index_entries)?;
+        let staged_path_set = staged_paths.iter().cloned().collect::<HashSet<_>>();
+        let staged_lfs_pointers = self.index_lfs_pointer_paths(&staged_path_set, &index_blobs)?;
+        let mut prepared_risks = Vec::new();
+        for (change, relative) in scoped_changes {
+            if change.kind == super::model::ChangeKind::Deleted {
+                continue;
+            }
+            let size_bytes = if change.staged {
+                index_blobs
+                    .get(&change.path)
+                    .map(|blob| blob.size)
+                    .unwrap_or_default()
+            } else {
+                fs::metadata(repository_root.join(&change.path))
+                    .ok()
+                    .filter(|metadata| metadata.is_file())
+                    .map(|metadata| metadata.len())
+                    .unwrap_or_default()
+            };
+            let mut risks = file_risks(engine, &relative, size_bytes);
+            if change.staged
+                && staged_lfs_pointers.contains(&change.path)
+                && !risks
+                    .iter()
+                    .any(|risk| risk.kind == ProjectRiskKind::LfsRecommended)
+            {
+                risks.push(GameProjectRisk {
+                    kind: ProjectRiskKind::LfsRecommended,
+                    severity: ProjectRiskSeverity::Danger,
+                    path: relative.clone(),
+                    message: "This staged Git LFS pointer needs a matching staged filter=lfs rule."
+                        .to_owned(),
+                });
+            }
+            if !risks.is_empty() {
+                prepared_risks.push((change, risks));
+            }
+        }
+        let staged_candidates = prepared_risks
+            .iter()
+            .filter(|(change, _)| change.staged)
+            .map(|(change, _)| change.path.clone())
+            .collect::<Vec<_>>();
+        let unstaged_candidates = prepared_risks
+            .iter()
+            .filter(|(change, _)| !change.staged)
+            .map(|(change, _)| change.path.clone())
+            .collect::<Vec<_>>();
+        let staged_lfs = self.lfs_tracked_paths(&staged_candidates, true)?;
+        let unstaged_lfs = self.lfs_tracked_paths(&unstaged_candidates, false)?;
+
+        for (change, change_risks) in prepared_risks {
+            let lfs_safe = if change.staged {
+                staged_lfs_pointers.contains(&change.path) && staged_lfs.contains(&change.path)
+            } else {
+                unstaged_lfs.contains(&change.path)
+            };
+            for mut issue in change_risks {
+                if lfs_safe
+                    && matches!(
+                        issue.kind,
+                        ProjectRiskKind::LfsRecommended | ProjectRiskKind::LargeFile
+                    )
+                {
+                    continue;
+                }
+                if change.staged
+                    && staged_lfs_pointers.contains(&change.path)
+                    && !staged_lfs.contains(&change.path)
+                    && issue.kind == ProjectRiskKind::LfsRecommended
+                {
+                    issue.severity = ProjectRiskSeverity::Danger;
+                    issue.message =
+                        "This staged Git LFS pointer has no matching staged filter=lfs rule."
+                            .to_owned();
+                } else if change.staged
+                    && staged_lfs.contains(&change.path)
+                    && issue.kind == ProjectRiskKind::LfsRecommended
+                {
+                    issue.message =
+                        "Git LFS is configured, but the staged file is not an LFS pointer."
+                            .to_owned();
+                }
+                issue.path = repository_game_path(repository_root, game_project_root, &issue.path);
+                issues.push(issue);
+            }
+        }
+
+        issues.sort_by(|left, right| {
+            risk_priority(left.severity)
+                .cmp(&risk_priority(right.severity))
+                .then_with(|| left.path.to_lowercase().cmp(&right.path.to_lowercase()))
+        });
+        let mut seen = HashSet::new();
+        issues.retain(|issue| seen.insert((issue.kind, issue.path.to_lowercase())));
+        Ok(issues)
+    }
+
+    fn lfs_tracked_paths(
+        &self,
+        paths: &[String],
+        cached: bool,
+    ) -> Result<HashSet<String>, GitError> {
+        if paths.is_empty() {
+            return Ok(HashSet::new());
+        }
+        let mut input = Vec::new();
+        for path in paths {
+            input.extend_from_slice(path.as_bytes());
+            input.push(0);
+        }
+        let output = if cached {
+            self.runner.run_with_input(
+                ["check-attr", "--cached", "-z", "--stdin", "filter"],
+                &input,
+            )?
+        } else {
+            self.runner
+                .run_with_input(["check-attr", "-z", "--stdin", "filter"], &input)?
+        };
+        Ok(parse_lfs_attributes(&output))
+    }
+
+    fn index_entries(&self, paths: &[String]) -> Result<HashMap<String, String>, GitError> {
+        const WINDOWS_PATHSPEC_BUDGET: usize = 12 * 1024;
+        let mut paths = paths.to_vec();
+        paths.sort();
+        paths.dedup();
+
+        let mut entries = HashMap::new();
+        let mut chunk = Vec::new();
+        let mut chunk_units = 0;
+        for path in paths {
+            let path_units = path.encode_utf16().count().saturating_add(16);
+            if !chunk.is_empty() && chunk_units + path_units > WINDOWS_PATHSPEC_BUDGET {
+                let output = self
+                    .runner
+                    .run_with_literal_paths(&["ls-files", "--stage", "-z"], &chunk)?;
+                entries.extend(parse_index_oids(&output));
+                chunk.clear();
+                chunk_units = 0;
+            }
+            chunk_units += path_units;
+            chunk.push(path);
+        }
+        if !chunk.is_empty() {
+            let output = self
+                .runner
+                .run_with_literal_paths(&["ls-files", "--stage", "-z"], &chunk)?;
+            entries.extend(parse_index_oids(&output));
+        }
+        Ok(entries)
+    }
+
+    fn index_blobs(
+        &self,
+        paths: &[String],
+        index_entries: &HashMap<String, String>,
+    ) -> Result<HashMap<String, IndexBlob>, GitError> {
+        if paths.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let path_oids = paths
+            .iter()
+            .filter_map(|path| {
+                index_entries
+                    .get(path)
+                    .map(|oid| (path.clone(), oid.clone()))
+            })
+            .collect::<HashMap<_, _>>();
+
+        let mut oids = path_oids.values().cloned().collect::<Vec<_>>();
+        oids.sort();
+        oids.dedup();
+        let mut input = oids.join("\n").into_bytes();
+        input.push(b'\n');
+        let output = self.runner.run_with_input(
+            [
+                "cat-file",
+                "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+            ],
+            &input,
+        )?;
+        let sizes = parse_batch_object_sizes(&output);
+        Ok(path_oids
+            .into_iter()
+            .filter_map(|(path, oid)| {
+                let size = sizes.get(&oid).copied()?;
+                Some((path, IndexBlob { oid, size }))
+            })
+            .collect())
+    }
+
+    fn index_lfs_pointer_paths(
+        &self,
+        tracked_paths: &HashSet<String>,
+        index_blobs: &HashMap<String, IndexBlob>,
+    ) -> Result<HashSet<String>, GitError> {
+        const MAX_POINTER_BYTES: u64 = 1024;
+        let mut oid_paths = HashMap::<String, Vec<String>>::new();
+        for path in tracked_paths {
+            let Some(blob) = index_blobs.get(path) else {
+                continue;
+            };
+            if blob.size <= MAX_POINTER_BYTES {
+                oid_paths
+                    .entry(blob.oid.clone())
+                    .or_default()
+                    .push(path.clone());
+            }
+        }
+        if oid_paths.is_empty() {
+            return Ok(HashSet::new());
+        }
+
+        let oids = oid_paths.keys().cloned().collect::<Vec<_>>();
+        let mut pointers = HashSet::new();
+        for chunk in oids.chunks(256) {
+            let mut input = chunk.join("\n").into_bytes();
+            input.push(b'\n');
+            let output = self
+                .runner
+                .run_with_input(["cat-file", "--batch"], &input)?;
+            for (oid, content) in parse_batch_blobs(&output) {
+                if is_lfs_pointer(&content) {
+                    pointers.extend(oid_paths.get(&oid).into_iter().flatten().cloned());
+                }
+            }
+        }
+        Ok(pointers)
     }
 
     fn validate_branch(&self, branch: &str) -> Result<(), GitError> {
@@ -364,15 +744,198 @@ fn invalid_repository() -> GitError {
     GitError::safe("The selected directory is not a Git repository")
 }
 
+fn find_game_project_root(requested: &Path, repository_root: &Path) -> Option<PathBuf> {
+    let mut candidate = Some(requested);
+    while let Some(path) = candidate {
+        if detect_game_project(path).ok().flatten().is_some() {
+            return Some(path.to_path_buf());
+        }
+        if path == repository_root {
+            break;
+        }
+        candidate = path
+            .parent()
+            .filter(|parent| parent.starts_with(repository_root));
+    }
+    None
+}
+
+fn game_relative_path(
+    repository_root: &Path,
+    game_project_root: &Path,
+    repository_path: &str,
+) -> Option<String> {
+    let prefix = game_project_root
+        .strip_prefix(repository_root)
+        .ok()?
+        .to_string_lossy()
+        .replace('\\', "/");
+    let repository_path = repository_path.replace('\\', "/");
+    if prefix.is_empty() {
+        return Some(repository_path);
+    }
+    let prefix_components = prefix.split('/').collect::<Vec<_>>();
+    let path_components = repository_path.split('/').collect::<Vec<_>>();
+    if path_components.len() < prefix_components.len()
+        || !path_components
+            .iter()
+            .zip(&prefix_components)
+            .all(|(path, prefix)| path.to_lowercase() == prefix.to_lowercase())
+    {
+        return None;
+    }
+    Some(path_components[prefix_components.len()..].join("/"))
+}
+
+fn repository_game_path(
+    repository_root: &Path,
+    game_project_root: &Path,
+    game_path: &str,
+) -> String {
+    game_project_root
+        .strip_prefix(repository_root)
+        .unwrap_or_else(|_| Path::new(""))
+        .join(game_path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn strip_meta_suffix(path: &str) -> Option<&str> {
+    let suffix_start = path.len().checked_sub(5)?;
+    path.get(suffix_start..)
+        .filter(|suffix| suffix.eq_ignore_ascii_case(".meta"))?;
+    path.get(..suffix_start)
+}
+
 fn is_branch_ref(value: &str) -> bool {
     value
         .strip_prefix("refs/heads/")
         .is_some_and(|name| !name.is_empty())
 }
 
+fn parse_index_oids(output: &[u8]) -> HashMap<String, String> {
+    output
+        .split(|byte| *byte == 0)
+        .filter_map(|record| {
+            let separator = record.iter().position(|byte| *byte == b'\t')?;
+            let metadata = std::str::from_utf8(&record[..separator]).ok()?;
+            let mut fields = metadata.split_ascii_whitespace();
+            let _mode = fields.next()?;
+            let oid = fields.next()?;
+            let stage = fields.next()?;
+            if stage != "0" || fields.next().is_some() {
+                return None;
+            }
+            let path = String::from_utf8_lossy(&record[separator + 1..]).into_owned();
+            Some((path, oid.to_owned()))
+        })
+        .collect()
+}
+
+fn parse_batch_object_sizes(output: &[u8]) -> HashMap<String, u64> {
+    output
+        .split(|byte| *byte == b'\n')
+        .filter_map(|line| {
+            let line = std::str::from_utf8(line).ok()?;
+            let mut fields = line.split_ascii_whitespace();
+            let oid = fields.next()?;
+            if fields.next()? != "blob" {
+                return None;
+            }
+            let size = fields.next()?.parse().ok()?;
+            fields.next().is_none().then(|| (oid.to_owned(), size))
+        })
+        .collect()
+}
+
+fn parse_batch_blobs(output: &[u8]) -> HashMap<String, Vec<u8>> {
+    let mut blobs = HashMap::new();
+    let mut cursor = 0;
+    while cursor < output.len() {
+        let Some(header_length) = output[cursor..].iter().position(|byte| *byte == b'\n') else {
+            break;
+        };
+        let header_end = cursor + header_length;
+        let Some(header) = std::str::from_utf8(&output[cursor..header_end]).ok() else {
+            break;
+        };
+        let mut fields = header.split_ascii_whitespace();
+        let Some(oid) = fields.next() else {
+            break;
+        };
+        if fields.next() != Some("blob") {
+            break;
+        }
+        let Some(size) = fields.next().and_then(|value| value.parse::<usize>().ok()) else {
+            break;
+        };
+        if fields.next().is_some() {
+            break;
+        }
+        let content_start = header_end + 1;
+        let Some(content_end) = content_start.checked_add(size) else {
+            break;
+        };
+        if content_end >= output.len() || output[content_end] != b'\n' {
+            break;
+        }
+        blobs.insert(oid.to_owned(), output[content_start..content_end].to_vec());
+        cursor = content_end + 1;
+    }
+    blobs
+}
+
+fn is_lfs_pointer(content: &[u8]) -> bool {
+    let Ok(content) = std::str::from_utf8(content) else {
+        return false;
+    };
+    let mut lines = content.lines();
+    if lines.next() != Some("version https://git-lfs.github.com/spec/v1") {
+        return false;
+    }
+    let Some(oid) = lines
+        .next()
+        .and_then(|line| line.strip_prefix("oid sha256:"))
+    else {
+        return false;
+    };
+    if oid.len() != 64 || !oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return false;
+    }
+    let Some(size) = lines.next().and_then(|line| line.strip_prefix("size ")) else {
+        return false;
+    };
+    size.parse::<u64>().is_ok() && lines.next().is_none()
+}
+
+fn parse_lfs_attributes(output: &[u8]) -> HashSet<String> {
+    let mut fields = output.split(|byte| *byte == 0);
+    let mut tracked = HashSet::new();
+    while let Some(path) = fields.next().filter(|field| !field.is_empty()) {
+        let Some(attribute) = fields.next() else {
+            break;
+        };
+        let Some(value) = fields.next() else {
+            break;
+        };
+        if attribute == b"filter" && value.eq_ignore_ascii_case(b"lfs") {
+            tracked.insert(String::from_utf8_lossy(path).into_owned());
+        }
+    }
+    tracked
+}
+
+const fn risk_priority(severity: ProjectRiskSeverity) -> u8 {
+    match severity {
+        ProjectRiskSeverity::Danger => 0,
+        ProjectRiskSeverity::Warning => 1,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
+        collections::HashSet,
         fs,
         path::{Path, PathBuf},
         process::Command,
@@ -380,7 +943,11 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use super::GitService;
+    use crate::game_projects::{
+        FileCategory, GameEngine, ProjectRiskKind, GIT_HOST_HARD_LIMIT_BYTES,
+    };
+
+    use super::{game_relative_path, is_lfs_pointer, parse_lfs_attributes, GitService};
 
     static NEXT_REPOSITORY: AtomicU64 = AtomicU64::new(0);
 
@@ -462,7 +1029,28 @@ mod tests {
 
         let ordinary_directory = repository.path.join("ordinary-directory");
         fs::create_dir(&ordinary_directory).expect("ordinary directory");
-        assert!(GitService::open(&ordinary_directory).is_err());
+        let nested_service =
+            GitService::open(&ordinary_directory).expect("directory inside repository");
+        assert_eq!(
+            nested_service
+                .repository_path()
+                .canonicalize()
+                .expect("canonical service root"),
+            repository
+                .path
+                .canonicalize()
+                .expect("canonical fixture root")
+        );
+        assert_eq!(
+            nested_service
+                .selection_path()
+                .canonicalize()
+                .expect("canonical selection"),
+            repository
+                .path
+                .canonicalize()
+                .expect("canonical fixture root")
+        );
     }
 
     #[test]
@@ -505,6 +1093,28 @@ mod tests {
             .changes
             .iter()
             .any(|change| change.path == "untracked file.txt" && change.staged));
+    }
+
+    #[test]
+    fn change_count_counts_a_partially_staged_path_once() {
+        let repository = TestRepository::new();
+        fs::write(repository.path.join("tracked.txt"), "staged\n").expect("write staged version");
+        repository.git(&["add", "--", "tracked.txt"]);
+        fs::write(repository.path.join("tracked.txt"), "worktree\n")
+            .expect("write unstaged version");
+        let service = GitService::open(&repository.path).expect("valid repository");
+
+        assert_eq!(service.change_count().expect("change count"), 1);
+        assert_eq!(
+            service
+                .snapshot()
+                .expect("partial snapshot")
+                .changes
+                .iter()
+                .filter(|change| change.path == "tracked.txt")
+                .count(),
+            2
+        );
     }
 
     #[test]
@@ -606,6 +1216,393 @@ mod tests {
             service.snapshot().expect("snapshot").repository.name,
             repository.path.file_name().unwrap().to_string_lossy()
         );
+    }
+
+    #[test]
+    fn snapshot_detects_unity_categories_and_meta_risks() {
+        let repository = TestRepository::new();
+        fs::create_dir(repository.path.join("Assets")).expect("create Assets");
+        fs::create_dir(repository.path.join("ProjectSettings")).expect("create ProjectSettings");
+        fs::write(
+            repository.path.join("ProjectSettings/ProjectVersion.txt"),
+            "m_EditorVersion: 2022.3.56f1\n",
+        )
+        .expect("write Unity version");
+        fs::write(repository.path.join("Assets/Hero.prefab"), "prefab\n")
+            .expect("write Unity prefab");
+        let service = GitService::open(&repository.path).expect("valid repository");
+
+        let snapshot = service.snapshot().expect("Unity snapshot");
+
+        let profile = snapshot.game_project.expect("Unity profile");
+        assert_eq!(profile.engine, GameEngine::Unity);
+        assert_eq!(profile.version.as_deref(), Some("2022.3.56f1"));
+        assert!(snapshot.changes.iter().any(|change| {
+            change.path == "Assets/Hero.prefab" && change.game_category == Some(FileCategory::Scene)
+        }));
+        assert!(snapshot.game_safety_issues.iter().any(|issue| {
+            issue.kind == ProjectRiskKind::MissingMeta && issue.path == "Assets/Hero.prefab"
+        }));
+    }
+
+    #[test]
+    fn nested_unity_selection_keeps_the_git_root_and_prefixes_game_paths() {
+        let repository = TestRepository::new();
+        let game_root = repository.path.join("Games/OrbitTactics");
+        fs::create_dir_all(game_root.join("Assets")).expect("create nested Assets");
+        fs::create_dir(game_root.join("ProjectSettings")).expect("create nested ProjectSettings");
+        fs::write(
+            game_root.join("ProjectSettings/ProjectVersion.txt"),
+            "m_EditorVersion: 2022.3.56f1\n",
+        )
+        .expect("write nested Unity version");
+        fs::write(game_root.join("Assets/Hero.prefab"), "prefab\n")
+            .expect("write nested Unity prefab");
+        let service = GitService::open(&game_root).expect("nested Unity selection");
+
+        let snapshot = service.snapshot().expect("nested Unity snapshot");
+
+        assert_eq!(
+            service
+                .repository_path()
+                .canonicalize()
+                .expect("canonical service root"),
+            repository
+                .path
+                .canonicalize()
+                .expect("canonical fixture root")
+        );
+        assert_eq!(
+            service
+                .selection_path()
+                .canonicalize()
+                .expect("canonical selection"),
+            game_root.canonicalize().expect("canonical game root")
+        );
+        assert_eq!(
+            snapshot.repository.selection_path.as_deref(),
+            Some(service.selection_path().to_string_lossy().as_ref())
+        );
+        let profile = snapshot.game_project.expect("nested Unity profile");
+        assert_eq!(profile.engine, GameEngine::Unity);
+        assert_eq!(
+            profile.descriptor_path.as_deref(),
+            Some("Games/OrbitTactics/ProjectSettings/ProjectVersion.txt")
+        );
+        assert!(snapshot.changes.iter().any(|change| {
+            change.path == "Games/OrbitTactics/Assets/Hero.prefab"
+                && change.game_category == Some(FileCategory::Scene)
+        }));
+        assert!(snapshot.game_safety_issues.iter().any(|issue| {
+            issue.kind == ProjectRiskKind::MissingMeta
+                && issue.path == "Games/OrbitTactics/Assets/Hero.prefab"
+        }));
+    }
+
+    #[test]
+    fn nested_game_scoping_is_case_insensitive_for_windows_git_paths() {
+        let repository = Path::new(r"D:\Repos\Studio");
+        let project = Path::new(r"D:\Repos\Studio\Games\OrbitTactics");
+
+        assert_eq!(
+            game_relative_path(repository, project, "games/orbittactics/Assets/Hero.prefab")
+                .as_deref(),
+            Some("Assets/Hero.prefab")
+        );
+    }
+
+    #[test]
+    fn staged_meta_deletion_is_reported_even_when_worktree_restores_the_file() {
+        let repository = TestRepository::new();
+        fs::create_dir(repository.path.join("Assets")).expect("create Assets");
+        fs::create_dir(repository.path.join("ProjectSettings")).expect("create ProjectSettings");
+        fs::write(
+            repository.path.join("ProjectSettings/ProjectVersion.txt"),
+            "m_EditorVersion: 2022.3.56f1\n",
+        )
+        .expect("write Unity version");
+        fs::write(repository.path.join("Assets/Hero.prefab"), "prefab\n")
+            .expect("write Unity asset");
+        fs::write(
+            repository.path.join("Assets/Hero.prefab.meta"),
+            "guid: hero\n",
+        )
+        .expect("write Unity meta");
+        repository.git(&[
+            "add",
+            "--",
+            "ProjectSettings/ProjectVersion.txt",
+            "Assets/Hero.prefab",
+            "Assets/Hero.prefab.meta",
+        ]);
+        repository.git(&["commit", "-m", "add Unity asset"]);
+        fs::remove_file(repository.path.join("Assets/Hero.prefab.meta"))
+            .expect("delete Unity meta");
+        repository.git(&["add", "-u", "--", "Assets/Hero.prefab.meta"]);
+        fs::write(
+            repository.path.join("Assets/Hero.prefab.meta"),
+            "guid: hero\n",
+        )
+        .expect("restore worktree meta only");
+        let service = GitService::open(&repository.path).expect("valid repository");
+
+        let snapshot = service.snapshot().expect("split index/worktree snapshot");
+
+        assert!(snapshot.game_safety_issues.iter().any(|issue| {
+            issue.kind == ProjectRiskKind::MissingMeta
+                && issue.severity == crate::game_projects::ProjectRiskSeverity::Danger
+                && issue.path.eq_ignore_ascii_case("Assets/Hero.prefab")
+        }));
+    }
+
+    #[test]
+    fn staged_new_unity_asset_keeps_the_danger_over_the_pairing_warning() {
+        let repository = TestRepository::new();
+        fs::create_dir(repository.path.join("Assets")).expect("create Assets");
+        fs::create_dir(repository.path.join("ProjectSettings")).expect("create ProjectSettings");
+        fs::write(
+            repository.path.join("ProjectSettings/ProjectVersion.txt"),
+            "m_EditorVersion: 2022.3.56f1\n",
+        )
+        .expect("write Unity version");
+        fs::write(repository.path.join("Assets/Hero.prefab"), "prefab\n")
+            .expect("write Unity asset");
+        fs::write(
+            repository.path.join("Assets/Hero.prefab.meta"),
+            "guid: hero\n",
+        )
+        .expect("write Unity meta");
+        repository.git(&["add", "--", "Assets/Hero.prefab"]);
+        let service = GitService::open(&repository.path).expect("valid repository");
+
+        let snapshot = service.snapshot().expect("one-sided staged Unity pair");
+        let matching = snapshot
+            .game_safety_issues
+            .iter()
+            .filter(|issue| {
+                issue.kind == ProjectRiskKind::MissingMeta
+                    && issue.path.eq_ignore_ascii_case("Assets/Hero.prefab")
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(matching.len(), 1);
+        assert_eq!(
+            matching[0].severity,
+            crate::game_projects::ProjectRiskSeverity::Danger
+        );
+    }
+
+    #[test]
+    fn staged_unity_folder_meta_uses_indexed_descendants_instead_of_disk_directories() {
+        let repository = TestRepository::new();
+        fs::create_dir_all(repository.path.join("Assets/NonEmpty"))
+            .expect("create non-empty Unity folder");
+        fs::create_dir(repository.path.join("Assets/Empty")).expect("create empty Unity folder");
+        fs::create_dir(repository.path.join("ProjectSettings")).expect("create ProjectSettings");
+        fs::write(
+            repository.path.join("ProjectSettings/ProjectVersion.txt"),
+            "m_EditorVersion: 2022.3.56f1\n",
+        )
+        .expect("write Unity version");
+        fs::write(
+            repository.path.join("Assets/NonEmpty.meta"),
+            "guid: non-empty\n",
+        )
+        .expect("write non-empty folder meta");
+        fs::write(
+            repository.path.join("Assets/NonEmpty/Hero.asset"),
+            "asset\n",
+        )
+        .expect("write indexed child");
+        fs::write(repository.path.join("Assets/Empty.meta"), "guid: empty\n")
+            .expect("write empty folder meta");
+        repository.git(&[
+            "add",
+            "--",
+            "Assets/NonEmpty.meta",
+            "Assets/NonEmpty/Hero.asset",
+            "Assets/Empty.meta",
+        ]);
+        let service = GitService::open(&repository.path).expect("valid repository");
+
+        let snapshot = service.snapshot().expect("folder meta snapshot");
+
+        assert!(!snapshot.game_safety_issues.iter().any(|issue| {
+            issue.kind == ProjectRiskKind::OrphanMeta
+                && issue.path.eq_ignore_ascii_case("Assets/NonEmpty.meta")
+        }));
+        assert!(snapshot.game_safety_issues.iter().any(|issue| {
+            issue.kind == ProjectRiskKind::OrphanMeta
+                && issue.severity == crate::game_projects::ProjectRiskSeverity::Danger
+                && issue.path.eq_ignore_ascii_case("Assets/Empty.meta")
+        }));
+    }
+
+    #[test]
+    fn staged_blob_size_wins_over_a_smaller_worktree_file() {
+        let repository = TestRepository::new();
+        fs::create_dir(repository.path.join("Assets")).expect("create Assets");
+        fs::create_dir(repository.path.join("ProjectSettings")).expect("create ProjectSettings");
+        fs::write(
+            repository.path.join("ProjectSettings/ProjectVersion.txt"),
+            "m_EditorVersion: 2022.3.56f1\n",
+        )
+        .expect("write Unity version");
+        let asset = repository.path.join("Assets/LargeAsset.bin");
+        let file = fs::File::create(&asset).expect("create large staged asset");
+        file.set_len(GIT_HOST_HARD_LIMIT_BYTES)
+            .expect("size large staged asset");
+        repository.git(&["add", "--", "Assets/LargeAsset.bin"]);
+        fs::write(&asset, b"small worktree replacement").expect("shrink worktree asset");
+        let service = GitService::open(&repository.path).expect("valid repository");
+
+        let snapshot = service.snapshot().expect("snapshot with staged large blob");
+
+        assert!(snapshot.game_safety_issues.iter().any(|issue| {
+            issue.kind == ProjectRiskKind::LargeFile
+                && issue.severity == crate::game_projects::ProjectRiskSeverity::Danger
+                && issue.path == "Assets/LargeAsset.bin"
+        }));
+    }
+
+    #[test]
+    fn git_lfs_attributes_suppress_binary_asset_recommendations() {
+        let repository = TestRepository::new();
+        fs::create_dir(repository.path.join("Content")).expect("create Content");
+        fs::write(
+            repository.path.join("OrbitTactics.uproject"),
+            r#"{"EngineAssociation":"5.6"}"#,
+        )
+        .expect("write Unreal descriptor");
+        fs::write(
+            repository.path.join(".gitattributes"),
+            "*.uasset filter=lfs diff=lfs merge=lfs -text\n",
+        )
+        .expect("write attributes");
+        fs::write(repository.path.join("Content/Hero.uasset"), b"binary")
+            .expect("write Unreal asset");
+        let service = GitService::open(&repository.path).expect("valid repository");
+
+        let snapshot = service.snapshot().expect("Unreal snapshot");
+
+        assert_eq!(
+            snapshot.game_project.as_ref().map(|profile| profile.engine),
+            Some(GameEngine::Unreal)
+        );
+        assert!(!snapshot
+            .game_safety_issues
+            .iter()
+            .any(|issue| issue.kind == ProjectRiskKind::LfsRecommended));
+    }
+
+    #[test]
+    fn a_staged_git_lfs_pointer_suppresses_binary_asset_warnings() {
+        let repository = TestRepository::new();
+        fs::create_dir(repository.path.join("Content")).expect("create Content");
+        fs::write(
+            repository.path.join("OrbitTactics.uproject"),
+            r#"{"EngineAssociation":"5.6"}"#,
+        )
+        .expect("write Unreal descriptor");
+        fs::write(
+            repository.path.join("Content/Hero.uasset"),
+            b"version https://git-lfs.github.com/spec/v1\noid sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nsize 123\n",
+        )
+        .expect("write LFS pointer");
+        repository.git(&["add", "--", "Content/Hero.uasset"]);
+        fs::write(
+            repository.path.join(".gitattributes"),
+            "*.uasset filter=lfs diff=lfs merge=lfs -text\n",
+        )
+        .expect("write attributes");
+        repository.git(&["add", "--", ".gitattributes"]);
+        let service = GitService::open(&repository.path).expect("valid repository");
+
+        let snapshot = service.snapshot().expect("staged LFS snapshot");
+
+        assert!(!snapshot
+            .game_safety_issues
+            .iter()
+            .any(|issue| issue.path == "Content/Hero.uasset"));
+    }
+
+    #[test]
+    fn staged_lfs_pointer_without_a_staged_attribute_is_dangerous() {
+        let repository = TestRepository::new();
+        fs::create_dir(repository.path.join("Assets")).expect("create Assets");
+        fs::create_dir(repository.path.join("ProjectSettings")).expect("create ProjectSettings");
+        fs::write(
+            repository.path.join("ProjectSettings/ProjectVersion.txt"),
+            "m_EditorVersion: 2022.3.56f1\n",
+        )
+        .expect("write Unity version");
+        fs::write(
+            repository.path.join("Assets/Hero.png"),
+            b"version https://git-lfs.github.com/spec/v1\noid sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nsize 41943040\n",
+        )
+        .expect("write staged pointer");
+        repository.git(&["add", "--", "Assets/Hero.png"]);
+        fs::write(repository.path.join(".gitattributes"), "*.png -filter\n")
+            .expect("disable any inherited PNG filter");
+        repository.git(&["add", "--", ".gitattributes"]);
+        let service = GitService::open(&repository.path).expect("valid repository");
+
+        let snapshot = service.snapshot().expect("staged pointer snapshot");
+
+        assert!(
+            snapshot.game_safety_issues.iter().any(|issue| {
+                issue.kind == ProjectRiskKind::LfsRecommended
+                    && issue.severity == crate::game_projects::ProjectRiskSeverity::Danger
+                    && issue.path == "Assets/Hero.png"
+            }),
+            "{:?} {:?}",
+            snapshot.game_safety_issues,
+            snapshot.changes
+        );
+    }
+
+    #[test]
+    fn deleting_an_unreal_binary_does_not_recommend_lfs() {
+        let repository = TestRepository::new();
+        fs::create_dir(repository.path.join("Content")).expect("create Content");
+        fs::write(
+            repository.path.join("OrbitTactics.uproject"),
+            r#"{"EngineAssociation":"5.6"}"#,
+        )
+        .expect("write Unreal descriptor");
+        fs::write(repository.path.join("Content/Hero.uasset"), b"binary")
+            .expect("write Unreal asset");
+        repository.git(&["add", "--", "OrbitTactics.uproject", "Content/Hero.uasset"]);
+        repository.git(&["commit", "-m", "add Unreal asset"]);
+        fs::remove_file(repository.path.join("Content/Hero.uasset")).expect("delete Unreal asset");
+        let service = GitService::open(&repository.path).expect("valid repository");
+
+        let snapshot = service.snapshot().expect("Unreal deletion snapshot");
+
+        assert!(!snapshot
+            .game_safety_issues
+            .iter()
+            .any(|issue| issue.path == "Content/Hero.uasset"));
+    }
+
+    #[test]
+    fn recognizes_only_canonical_git_lfs_pointer_content() {
+        let pointer = b"version https://git-lfs.github.com/spec/v1\noid sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nsize 123\n";
+
+        assert!(is_lfs_pointer(pointer));
+        assert!(!is_lfs_pointer(
+            b"version https://git-lfs.github.com/spec/v1\nsize 123\n"
+        ));
+        assert!(!is_lfs_pointer(b"ordinary binary content"));
+    }
+
+    #[test]
+    fn parses_only_lfs_filter_attribute_records() {
+        let parsed = parse_lfs_attributes(
+            b"Content/Hero.uasset\0filter\0lfs\0Assets/Hero.prefab\0filter\0unspecified\0",
+        );
+
+        assert_eq!(parsed, HashSet::from(["Content/Hero.uasset".to_owned()]));
     }
 
     #[test]

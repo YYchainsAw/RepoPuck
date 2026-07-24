@@ -46,6 +46,41 @@ describe("ChangeGroups", () => {
     expect(screen.getByText("−8")).toBeInTheDocument();
   });
 
+  it("groups tracked game project changes by development workflow", () => {
+    const gameChanges: ChangeEntry[] = [
+      { ...changes[0], gameCategory: "code" },
+      {
+        ...changes[1],
+        path: "Assets/Scenes/CombatArena.unity",
+        gameCategory: "scene",
+      },
+      {
+        ...changes[2],
+        path: "Assets/Textures/Planet.png",
+        gameCategory: "asset",
+      },
+    ];
+
+    render(
+      <ChangeGroups
+        changes={gameChanges}
+        busy={false}
+        onSetStaged={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Code 1" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Scenes & Blueprints 1" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Unversioned files 1" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /^Changes / }),
+    ).not.toBeInTheDocument();
+  });
+
   it("stages one accessible row", () => {
     const onSetStaged = vi.fn();
     render(<ChangeGroups changes={changes} busy={false} onSetStaged={onSetStaged} />);

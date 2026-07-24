@@ -7,12 +7,16 @@ import "../../styles/global.css";
 import type { GitWorkspaceValue } from "../git/useGitWorkspace";
 import type { NativeShellClient, NativeShellListeners } from "./nativeClient";
 import type { ShellSettingsValue } from "./ShellSettingsProvider";
+import type { NativeShellStateValue } from "./useNativeShellState";
 import { PanelShell } from "./PanelShell";
 
 const workspace = vi.hoisted(() => ({ current: {} as GitWorkspaceValue }));
 const dialog = vi.hoisted(() => ({ open: vi.fn() }));
 const shell = vi.hoisted(() => ({ current: {} as ShellSettingsValue }));
 const native = vi.hoisted(() => ({ current: {} as NativeShellClient }));
+const nativeShellState = vi.hoisted(() => ({
+  current: {} as NativeShellStateValue,
+}));
 const nativeListeners = vi.hoisted(() => ({ current: null as NativeShellListeners | null }));
 
 vi.mock("../git/useGitWorkspace", () => ({
@@ -29,6 +33,10 @@ vi.mock("./ShellSettingsProvider", () => ({
 
 vi.mock("./nativeClient", () => ({
   createNativeShellClient: () => native.current,
+}));
+
+vi.mock("./useNativeShellState", () => ({
+  useNativeShellState: () => nativeShellState.current,
 }));
 
 const snapshot = {
@@ -93,6 +101,20 @@ beforeEach(() => {
     clearRecentRepositories: vi.fn(),
   };
   nativeListeners.current = null;
+  nativeShellState.current = {
+    state: {
+      mode: "puck",
+      panelPhase: "hidden",
+      transitionId: null,
+      activeMonitorName: null,
+      dockCorner: null,
+    },
+    transition: null,
+    modePending: false,
+    modeError: null,
+    setMode: vi.fn().mockResolvedValue(undefined),
+    completeTransition: vi.fn().mockResolvedValue(undefined),
+  };
   native.current = {
     togglePanel: vi.fn().mockResolvedValue(undefined),
     setPanelPinned: vi.fn().mockResolvedValue(undefined),
@@ -108,6 +130,110 @@ beforeEach(() => {
 });
 
 describe("PanelShell", () => {
+  it("shows detected game project context and safety checks above changes", () => {
+    workspace.current = createWorkspace({
+      snapshot: {
+        ...snapshot,
+        gameProject: {
+          name: "Orbit Tactics",
+          engine: "unity",
+          version: "2022.3.56f1",
+          descriptorPath: "ProjectSettings/ProjectVersion.txt",
+        },
+        gameSafetyIssues: [
+          {
+            kind: "missing-meta",
+            severity: "danger",
+            path: "Assets/Scenes/CombatArena.unity",
+            message: "This Unity asset is missing its .meta file.",
+          },
+        ],
+      },
+    });
+
+    render(<PanelShell />);
+
+    expect(screen.getByText("Orbit Tactics")).toBeInTheDocument();
+    expect(screen.getByText("Unity 2022.3.56f1")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Game project checks/ }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Missing .meta file")).toBeInTheDocument();
+  });
+
+  it("reopens danger checks when switching nested projects in one repository", () => {
+    const issue = {
+      kind: "missing-meta" as const,
+      severity: "danger" as const,
+      path: "Assets/Scenes/CombatArena.unity",
+      message: "This Unity asset is missing its .meta file.",
+    };
+    const firstSnapshot = {
+      ...snapshot,
+      repository: {
+        ...snapshot.repository,
+        selectionPath: "C:\\Projects\\studio\\Games\\First",
+      },
+      gameProject: {
+        name: "First",
+        engine: "unity" as const,
+      },
+      gameSafetyIssues: [issue],
+    };
+    workspace.current = createWorkspace({
+      snapshot: firstSnapshot,
+      selectedRepository: firstSnapshot.repository,
+    });
+    const { rerender } = render(<PanelShell />);
+    const safetyToggle = screen.getByRole("button", {
+      name: /Game project checks/,
+    });
+    fireEvent.click(safetyToggle);
+    expect(safetyToggle).toHaveAttribute("aria-expanded", "false");
+
+    const secondSnapshot = {
+      ...firstSnapshot,
+      repository: {
+        ...firstSnapshot.repository,
+        selectionPath: "C:\\Projects\\studio\\Games\\Second",
+      },
+      gameProject: {
+        name: "Second",
+        engine: "unity" as const,
+      },
+    };
+    workspace.current = createWorkspace({
+      snapshot: secondSnapshot,
+      selectedRepository: secondSnapshot.repository,
+    });
+    rerender(<PanelShell />);
+
+    expect(
+      screen.getByRole("button", { name: /Game project checks/ }),
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("removes the drawer drag control on the first close-transition event", () => {
+    nativeShellState.current.state.mode = "top-drawer";
+    nativeShellState.current.state.panelPhase = "open";
+    nativeShellState.current.transition = {
+      transitionId: 21,
+      mode: "top-drawer",
+      direction: "close",
+      animation: "drawer-roll",
+      anchor: "top-center",
+      durationMs: 200,
+    };
+
+    const { container } = render(<PanelShell />);
+
+    expect(screen.queryByRole("button", { name: "Move top drawer" })).toBeNull();
+    expect(container.querySelector(".drawer-drag-handle--inactive")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+  });
+
   it("switches branches and creates a branch from the branch menu", () => {
     render(<PanelShell />);
 

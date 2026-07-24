@@ -1,7 +1,10 @@
 use std::{
     path::{Path, PathBuf},
     process::Command,
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
 };
 
 #[cfg(windows)]
@@ -19,34 +22,75 @@ use crate::git::{
 #[derive(Default)]
 pub struct RepositoryState {
     service: Mutex<Option<GitService>>,
+    selection_intent: AtomicU64,
 }
 
 impl RepositoryState {
-    pub(crate) fn select(&self, path: PathBuf) -> Result<(), GitError> {
+    #[cfg(test)]
+    pub(crate) fn select(&self, path: PathBuf) -> Result<bool, GitError> {
+        let intent = self.reserve_selection();
+        self.select_reserved(path, intent)
+    }
+
+    pub(crate) fn select_reserved(&self, path: PathBuf, intent: u64) -> Result<bool, GitError> {
         // Repository discovery runs Git. Keep it outside the session lock so an in-flight
         // operation can finish without also blocking validation of the next selection.
         let service = GitService::open(&path)?;
-        let mut selected = self
-            .service
-            .lock()
-            .map_err(|_| GitError::safe("Repository state is unavailable"))?;
-        *selected = Some(service);
-        Ok(())
+        self.install_selection(service, intent, false)
     }
 
-    pub(crate) fn restore_if_empty(&self, path: PathBuf) -> Result<bool, GitError> {
-        // Startup restoration may finish after the user has explicitly selected another
-        // repository. Validate outside the lock, then install only if state is still empty.
-        let service = GitService::open(&path)?;
+    pub(crate) fn reserve_selection(&self) -> u64 {
+        self.selection_intent
+            .fetch_add(1, Ordering::AcqRel)
+            .wrapping_add(1)
+    }
+
+    pub(crate) fn selection_generation(&self) -> u64 {
+        self.selection_intent.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn reserve_selection_if_current(&self, expected: u64) -> Option<u64> {
+        let next = expected.wrapping_add(1);
+        self.selection_intent
+            .compare_exchange(expected, next, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| next)
+    }
+
+    fn install_selection(
+        &self,
+        service: GitService,
+        intent: u64,
+        only_if_empty: bool,
+    ) -> Result<bool, GitError> {
         let mut selected = self
             .service
             .lock()
             .map_err(|_| GitError::safe("Repository state is unavailable"))?;
-        if selected.is_some() {
+        if self.selection_intent.load(Ordering::Acquire) != intent
+            || (only_if_empty && selected.is_some())
+        {
             return Ok(false);
         }
         *selected = Some(service);
         Ok(true)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn restore_if_empty(&self, path: PathBuf) -> Result<bool, GitError> {
+        let intent = self.reserve_selection();
+        self.restore_if_empty_reserved(path, intent)
+    }
+
+    pub(crate) fn restore_if_empty_reserved(
+        &self,
+        path: PathBuf,
+        intent: u64,
+    ) -> Result<bool, GitError> {
+        // Startup restoration may finish after the user has explicitly selected another
+        // repository. Validate outside the lock, then install only if state is still empty.
+        let service = GitService::open(&path)?;
+        self.install_selection(service, intent, true)
     }
 
     fn with_service<T>(
@@ -63,7 +107,7 @@ impl RepositoryState {
         operation(service).map_err(error_message)
     }
 
-    fn selected_path(&self) -> Result<PathBuf, String> {
+    pub(crate) fn selected_path(&self) -> Result<PathBuf, String> {
         let selected = self
             .service
             .lock()
@@ -73,15 +117,32 @@ impl RepositoryState {
             .map(|service| service.repository_path().to_owned())
             .ok_or_else(|| "No repository is selected".to_owned())
     }
+
+    pub(crate) fn selected_selection_path(&self) -> Result<PathBuf, String> {
+        let selected = self
+            .service
+            .lock()
+            .map_err(|_| "Repository state is unavailable".to_owned())?;
+        selected
+            .as_ref()
+            .map(|service| service.selection_path().to_owned())
+            .ok_or_else(|| "No repository is selected".to_owned())
+    }
 }
 
 #[tauri::command]
 pub async fn select_repository(path: String, app: AppHandle) -> OperationResult {
     let selected = PathBuf::from(path);
+    let intent = app.state::<RepositoryState>().reserve_selection();
     let persistence_app = app.clone();
     match with_repository(app, move |state| {
-        state.select(selected).map_err(error_message)?;
-        state.selected_path()
+        if !state
+            .select_reserved(selected, intent)
+            .map_err(error_message)?
+        {
+            return Err("A newer repository selection took precedence".to_owned());
+        }
+        state.selected_selection_path()
     })
     .await
     {
@@ -242,7 +303,7 @@ fn error_message(error: GitError) -> String {
     error.message().to_owned()
 }
 
-fn persist_recent_repository(app: &AppHandle, path: &Path) -> Result<(), ()> {
+pub(crate) fn persist_recent_repository(app: &AppHandle, path: &Path) -> Result<(), ()> {
     let store = app.store("settings.json").map_err(|_| ())?;
     let existing = store
         .get("recentRepositories")
@@ -299,6 +360,7 @@ mod tests {
     };
 
     use super::RepositoryState;
+    use crate::git::service::GitService;
     use std::sync::TryLockError;
 
     static NEXT_REPOSITORY: AtomicU64 = AtomicU64::new(0);
@@ -391,15 +453,18 @@ mod tests {
             .join()
             .expect("first thread")
             .expect("first operation");
+        // Git process startup can be delayed when the full Windows test suite runs in parallel.
+        // Keep a generous deadlock guard without treating runner scheduling as a performance test.
+        let completion_timeout = Duration::from_secs(15);
         second_entered_rx
-            .recv_timeout(Duration::from_secs(2))
+            .recv_timeout(completion_timeout)
             .expect("second operation entered after release");
         second
             .join()
             .expect("second thread")
             .expect("second operation");
         selection_done_rx
-            .recv_timeout(Duration::from_secs(2))
+            .recv_timeout(completion_timeout)
             .expect("selection finished after release")
             .expect("select replacement repository");
         selecting.join().expect("selection thread");
@@ -421,8 +486,60 @@ mod tests {
             .restore_if_empty(restored_repository.0.clone())
             .expect("ignore late startup restore"));
         assert_eq!(
-            state.selected_path().expect("selected path"),
-            explicit_repository.0
+            state
+                .selected_path()
+                .expect("selected path")
+                .canonicalize()
+                .expect("canonical selected path"),
+            explicit_repository
+                .0
+                .canonicalize()
+                .expect("canonical explicit repository")
         );
+    }
+
+    #[test]
+    fn an_older_selection_intent_cannot_replace_a_newer_repository() {
+        let older_repository = TestRepository::new();
+        let newer_repository = TestRepository::new();
+        let state = RepositoryState::default();
+
+        let older_intent = state.reserve_selection();
+        let older_service =
+            GitService::open(&older_repository.0).expect("prepare older repository");
+        let newer_intent = state.reserve_selection();
+        let newer_service =
+            GitService::open(&newer_repository.0).expect("prepare newer repository");
+
+        assert!(state
+            .install_selection(newer_service, newer_intent, false)
+            .expect("install newer selection"));
+        assert!(!state
+            .install_selection(older_service, older_intent, false)
+            .expect("ignore stale selection"));
+        assert_eq!(
+            state
+                .selected_path()
+                .expect("selected path")
+                .canonicalize()
+                .expect("canonical selected path"),
+            newer_repository
+                .0
+                .canonicalize()
+                .expect("canonical newer repository")
+        );
+    }
+
+    #[test]
+    fn a_confirmation_can_reserve_only_if_no_newer_selection_arrived() {
+        let state = RepositoryState::default();
+        let observed = state.selection_generation();
+
+        assert_eq!(state.reserve_selection_if_current(observed), Some(1));
+        assert_eq!(state.reserve_selection_if_current(observed), None);
+
+        let newer = state.reserve_selection();
+        assert_eq!(newer, 2);
+        assert_eq!(state.reserve_selection_if_current(1), None);
     }
 }

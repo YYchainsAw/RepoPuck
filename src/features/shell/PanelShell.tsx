@@ -1,15 +1,18 @@
 import { BaseStyles, Button, Dialog, Spinner, TextInput, ThemeProvider } from "@primer/react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { GameProjectBanner, GameSafetyPanel } from "../game";
 import { ChangeGroups } from "../git/ChangeGroups";
 import { CommitComposer } from "../git/CommitComposer";
 import { RepositoryEmptyState } from "../git/RepositoryEmptyState";
 import { useGitWorkspace } from "../git/useGitWorkspace";
 import { ActionMenu } from "./ActionMenu";
+import { DrawerDragHandle } from "./DrawerDragHandle";
 import { Header } from "./Header";
 import { createNativeShellClient } from "./nativeClient";
 import { Notice } from "./Notice";
 import { SettingsDialog } from "./SettingsDialog";
 import { useShellSettings } from "./ShellSettingsProvider";
+import { useNativeShellState } from "./useNativeShellState";
 
 const busyLabels = {
   selectRepository: "Choosing repository…",
@@ -31,6 +34,7 @@ const busyLabels = {
 export function PanelShell() {
   const workspace = useGitWorkspace();
   const shell = useShellSettings();
+  const nativeShell = useNativeShellState();
   const nativeClient = useRef(createNativeShellClient()).current;
   const dark = shell.colorMode === "dark";
   const pinned = shell.settings.pinned;
@@ -78,7 +82,10 @@ export function PanelShell() {
 
   useEffect(() => {
     if (workspace.selectedRepository) {
-      shell.rememberRepository(workspace.selectedRepository.path);
+      shell.rememberRepository(
+        workspace.selectedRepository.selectionPath ??
+          workspace.selectedRepository.path,
+      );
     }
   }, [shell, workspace.selectedRepository]);
 
@@ -127,6 +134,13 @@ export function PanelShell() {
           data-min-width="360"
           data-min-height="560"
         >
+          <DrawerDragHandle
+            mode={nativeShell.state.mode}
+            closing={
+              nativeShell.transition?.direction === "close" ||
+              nativeShell.state.panelPhase === "closing"
+            }
+          />
           {workspace.snapshot ? (
             <>
               <div className="panel-top">
@@ -165,6 +179,26 @@ export function PanelShell() {
               </div>
               {feedback}
               <main className="changes-scroll" aria-label="Repository changes">
+                {workspace.snapshot.gameProject && (
+                  <div className="game-project-context">
+                    <GameProjectBanner
+                      profile={workspace.snapshot.gameProject}
+                      issues={workspace.snapshot.gameSafetyIssues ?? []}
+                    />
+                    {(workspace.snapshot.gameSafetyIssues?.length ?? 0) > 0 && (
+                      <GameSafetyPanel
+                        key={
+                          workspace.snapshot.repository.selectionPath ??
+                          workspace.snapshot.repository.path
+                        }
+                        issues={workspace.snapshot.gameSafetyIssues ?? []}
+                        defaultExpanded={workspace.snapshot.gameSafetyIssues?.some(
+                          (issue) => issue.severity === "danger",
+                        )}
+                      />
+                    )}
+                  </div>
+                )}
                 <ChangeGroups
                   changes={workspace.snapshot.changes}
                   busy={busy}
@@ -254,6 +288,10 @@ export function PanelShell() {
           <SettingsDialog
             open={settingsOpen}
             settings={shell.settings}
+            shellMode={nativeShell.state.mode}
+            shellModePending={nativeShell.modePending}
+            shellModeError={nativeShell.modeError}
+            onShellModeChange={(mode) => void nativeShell.setMode(mode)}
             onThemeChange={shell.setTheme}
             onPinnedChange={shell.setPinned}
             onClearRecent={shell.clearRecentRepositories}

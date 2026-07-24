@@ -522,6 +522,46 @@ describe("useGitWorkspace", () => {
     expect(client.getSnapshot).toHaveBeenCalledTimes(2);
   });
 
+  it("runs an explicit follow-up refresh after an older snapshot flight", async () => {
+    const client = createTestClient();
+    const activatedSnapshot = {
+      ...cloneSnapshot(initialSnapshot),
+      repository: {
+        ...initialSnapshot.repository,
+        name: "OrbitTactics",
+        path: "D:/Games/OrbitTactics",
+      },
+    };
+    let finishOldSnapshot!: (snapshot: RepositorySnapshot) => void;
+    client.getSnapshot
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishOldSnapshot = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(activatedSnapshot);
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(client.getSnapshot).toHaveBeenCalledTimes(1));
+
+    let refreshPromise!: Promise<void>;
+    await act(async () => {
+      refreshPromise = result.current.refresh();
+      await Promise.resolve();
+    });
+    expect(client.getSnapshot).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      finishOldSnapshot(cloneSnapshot(initialSnapshot));
+      await refreshPromise;
+    });
+
+    expect(client.getSnapshot).toHaveBeenCalledTimes(2);
+    expect(result.current.snapshot).toEqual(activatedSnapshot);
+  });
+
   it("ignores a pending refresh when the panel becomes hidden", async () => {
     const client = createTestClient();
     let finishSnapshot!: (snapshot: RepositorySnapshot) => void;

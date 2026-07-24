@@ -1,5 +1,7 @@
 use serde::Serialize;
 
+use crate::game_projects::{FileCategory, GameProjectProfile, GameProjectRisk};
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ChangeKind {
@@ -29,6 +31,8 @@ pub struct ChangeEntry {
     pub untracked: bool,
     pub additions: u64,
     pub deletions: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub game_category: Option<FileCategory>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -46,6 +50,8 @@ pub struct RepositoryInfo {
     pub name: String,
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_url: Option<String>,
@@ -60,6 +66,9 @@ pub struct RepositorySnapshot {
     pub ahead: u64,
     pub behind: u64,
     pub changes: Vec<ChangeEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub game_project: Option<GameProjectProfile>,
+    pub game_safety_issues: Vec<GameProjectRisk>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

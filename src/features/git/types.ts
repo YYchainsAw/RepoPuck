@@ -1,3 +1,9 @@
+import type {
+  GameFileCategory,
+  GameProjectSummary,
+  GameSafetyIssue,
+} from "../game";
+
 export type ChangeKind = "added" | "modified" | "deleted" | "renamed";
 
 export interface ChangeEntry {
@@ -7,6 +13,7 @@ export interface ChangeEntry {
   untracked: boolean;
   additions: number;
   deletions: number;
+  gameCategory?: GameFileCategory;
 }
 
 export interface BranchSummary {
@@ -24,6 +31,7 @@ export interface RepositorySnapshot {
   repository: {
     name: string;
     path: string;
+    selectionPath?: string;
     remoteName?: string;
     remoteUrl?: string;
   };
@@ -32,6 +40,8 @@ export interface RepositorySnapshot {
   ahead: number;
   behind: number;
   changes: ChangeEntry[];
+  gameProject?: GameProjectSummary;
+  gameSafetyIssues?: GameSafetyIssue[];
 }
 
 export interface GitClient {

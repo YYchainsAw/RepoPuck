@@ -32,6 +32,7 @@ const repositoriesEqual = (
   left !== null &&
   left.name === right.name &&
   left.path === right.path &&
+  left.selectionPath === right.selectionPath &&
   left.remoteName === right.remoteName &&
   left.remoteUrl === right.remoteUrl;
 
@@ -44,6 +45,22 @@ const snapshotsEqual = (
   left.currentBranch === right.currentBranch &&
   left.ahead === right.ahead &&
   left.behind === right.behind &&
+  left.gameProject?.name === right.gameProject?.name &&
+  left.gameProject?.engine === right.gameProject?.engine &&
+  left.gameProject?.version === right.gameProject?.version &&
+  left.gameProject?.descriptorPath === right.gameProject?.descriptorPath &&
+  (left.gameSafetyIssues ?? []).length ===
+    (right.gameSafetyIssues ?? []).length &&
+  (left.gameSafetyIssues ?? []).every((issue, index) => {
+    const candidate = (right.gameSafetyIssues ?? [])[index];
+    return (
+      candidate !== undefined &&
+      issue.kind === candidate.kind &&
+      issue.severity === candidate.severity &&
+      issue.path === candidate.path &&
+      issue.message === candidate.message
+    );
+  }) &&
   left.branches.length === right.branches.length &&
   left.branches.every((branch, index) => {
     const candidate = right.branches[index];
@@ -64,7 +81,8 @@ const snapshotsEqual = (
       change.staged === candidate.staged &&
       change.untracked === candidate.untracked &&
       change.additions === candidate.additions &&
-      change.deletions === candidate.deletions
+      change.deletions === candidate.deletions &&
+      change.gameCategory === candidate.gameCategory
     );
   });
 
@@ -84,6 +102,11 @@ interface MutationFlight {
 interface MutationOptions {
   submittedMessage?: string;
   refreshOnFailure?: boolean;
+}
+
+interface PendingRefresh {
+  client: GitClient;
+  generation: number;
 }
 
 export function GitProvider({
@@ -109,6 +132,7 @@ export function GitProvider({
   const mountedRef = useRef(false);
   const generationRef = useRef(0);
   const inFlightRef = useRef<RefreshFlight | null>(null);
+  const pendingRefreshRef = useRef<PendingRefresh | null>(null);
   const clientRef = useRef(client);
   const visibleRef = useRef(visible);
   clientRef.current = client;
@@ -169,11 +193,33 @@ export function GitProvider({
     [],
   );
 
-  const refresh = useCallback((): Promise<void> => {
+  const refresh = useCallback(async (): Promise<void> => {
     if (!mountedRef.current || !visibleRef.current) {
-      return Promise.resolve();
+      return;
     }
-    return performRefresh(clientRef.current, generationRef.current);
+    const targetClient = clientRef.current;
+    const generation = generationRef.current;
+    const existing = inFlightRef.current;
+    if (
+      existing?.client === targetClient &&
+      existing.generation === generation
+    ) {
+      pendingRefreshRef.current = { client: targetClient, generation };
+      await existing.promise;
+      const pending = pendingRefreshRef.current;
+      if (
+        pending?.client !== targetClient ||
+        pending.generation !== generation ||
+        !mountedRef.current ||
+        !visibleRef.current ||
+        clientRef.current !== targetClient ||
+        generationRef.current !== generation
+      ) {
+        return;
+      }
+      pendingRefreshRef.current = null;
+    }
+    await performRefresh(targetClient, generation);
   }, [performRefresh]);
 
   useEffect(() => {
@@ -182,6 +228,7 @@ export function GitProvider({
       mountedRef.current = false;
       generationRef.current += 1;
       inFlightRef.current = null;
+      pendingRefreshRef.current = null;
       mutationRef.current = null;
     };
   }, []);
@@ -189,6 +236,7 @@ export function GitProvider({
   useEffect(() => {
     generationRef.current += 1;
     const generation = generationRef.current;
+    pendingRefreshRef.current = null;
     if (mutationRef.current) {
       mutationRef.current = null;
       setBusyAction(null);
@@ -200,7 +248,7 @@ export function GitProvider({
     void performRefresh(client, generation);
 
     const timer = window.setInterval(() => {
-      if (!mutationRef.current) void refresh();
+      if (!mutationRef.current) void performRefresh(client, generation);
     }, pollIntervalMs);
     return () => {
       window.clearInterval(timer);
@@ -208,7 +256,7 @@ export function GitProvider({
         generationRef.current += 1;
       }
     };
-  }, [client, performRefresh, pollIntervalMs, refresh, visible]);
+  }, [client, performRefresh, pollIntervalMs, visible]);
 
   const refreshAfterMutation = useCallback(
     async (

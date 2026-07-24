@@ -1,6 +1,6 @@
 [package]
 name = "repopuck"
-version = "0.1.2"
+version = "0.2.0"
 description = "A tray-first Git client for Windows"
 authors = ["RepoPuck"]
 edition = "2021"
@@ -21,7 +21,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
+tauri-plugin-deep-link = "2"
 tauri-plugin-store = "2"
+tokio = { version = "1", features = ["time"] }
+
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
@@ -31,4 +36,5 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_IO",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
 ] }

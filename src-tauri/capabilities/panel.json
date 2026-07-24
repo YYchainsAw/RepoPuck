@@ -7,6 +7,7 @@
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:window:allow-is-visible",
+    "core:window:allow-start-dragging",
     "core:window:allow-start-resize-dragging",
     "dialog:allow-open",
     "store:allow-load",
