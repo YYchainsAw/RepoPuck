@@ -1,4 +1,5 @@
 import { lazy, Suspense } from "react";
+import { I18nProvider } from "./i18n";
 import { PuckWindow } from "./features/shell/PuckWindow";
 import { ShellSettingsProvider } from "./features/shell/ShellSettingsProvider";
 import {
@@ -36,13 +37,15 @@ export function App({
   return (
     <NativeShellStateProvider initialState={initialNativeShellState}>
       <ShellSettingsProvider initialSettings={initialSettings}>
-        {view === "puck" ? (
-          <PuckWindow />
-        ) : (
-          <Suspense fallback={null}>
-            <PanelWindow />
-          </Suspense>
-        )}
+        <I18nProvider>
+          {view === "puck" ? (
+            <PuckWindow />
+          ) : (
+            <Suspense fallback={null}>
+              <PanelWindow />
+            </Suspense>
+          )}
+        </I18nProvider>
       </ShellSettingsProvider>
     </NativeShellStateProvider>
   );

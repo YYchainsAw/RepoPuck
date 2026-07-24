@@ -1,10 +1,20 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+
+import { beforeEach, describe, expect, it } from "vitest";
 import {
+  createShellSettingsPersistence,
   DEFAULT_AI_COMMIT_PREFERENCES,
   getAICommitPreferences,
+  getLanguagePreference,
+  loadShellSettings,
   normalizeAICommitPreferences,
+  normalizeLanguagePreference,
   normalizeShellSettings,
 } from "./settings";
+
+beforeEach(() => {
+  window.localStorage.clear();
+});
 
 describe("AI commit preferences", () => {
   it("upgrades legacy settings with privacy-safe defaults", () => {
@@ -15,12 +25,45 @@ describe("AI commit preferences", () => {
     });
 
     expect(settings.aiCommit).toEqual(DEFAULT_AI_COMMIT_PREFERENCES);
+    expect(settings.language).toBe("system");
     expect(getAICommitPreferences(settings)).toEqual({
       baseUrl: "https://api.openai.com/v1",
       model: "gpt-4.1-mini",
       language: "zh-CN",
       commitType: "feat",
       scope: "",
+    });
+  });
+
+  it("migrates legacy and invalid UI language values to system", () => {
+    expect(normalizeLanguagePreference(undefined)).toBe("system");
+    expect(normalizeLanguagePreference("fr")).toBe("system");
+    expect(getLanguagePreference({ theme: "light", pinned: false, recentRepositories: [] }))
+      .toBe("system");
+  });
+
+  it.each(["system", "zh-CN", "en"] as const)(
+    "accepts the persisted %s UI language preference",
+    (language) => {
+      expect(normalizeShellSettings({ language }).language).toBe(language);
+    },
+  );
+
+  it("persists and reloads the UI language in the browser fallback", async () => {
+    const persistence = createShellSettingsPersistence();
+    await persistence.save({
+      theme: "dark",
+      pinned: true,
+      recentRepositories: ["D:\\game"],
+      language: "zh-CN",
+      aiCommit: DEFAULT_AI_COMMIT_PREFERENCES,
+    });
+
+    await expect(loadShellSettings()).resolves.toMatchObject({
+      theme: "dark",
+      pinned: true,
+      recentRepositories: ["D:\\game"],
+      language: "zh-CN",
     });
   });
 
