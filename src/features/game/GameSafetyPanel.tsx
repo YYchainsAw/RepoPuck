@@ -10,16 +10,15 @@ import {
 } from "@primer/octicons-react";
 import { CounterLabel } from "@primer/react";
 import { useId, useState } from "react";
+import { useI18n } from "../../i18n";
+import {
+  getGameCopy,
+  getLocalizedIssueLabel,
+  getLocalizedSeverity,
+  localizeGameIssueMessage,
+} from "../../i18n/game";
 import styles from "./game.module.css";
 import type { GameSafetyIssue, GameSafetyIssueKind } from "./types";
-
-const issueLabels: Record<GameSafetyIssueKind, string> = {
-  "missing-meta": "Missing .meta file",
-  "orphan-meta": "Orphan .meta file",
-  "generated-file": "Generated file",
-  "large-file": "Large file",
-  "lfs-recommended": "Git LFS recommended",
-};
 
 const issueIcons = {
   "missing-meta": FileRemovedIcon,
@@ -44,6 +43,8 @@ export function GameSafetyPanel({
   className,
   onExpandedChange,
 }: GameSafetyPanelProps) {
+  const { language } = useI18n();
+  const copy = getGameCopy(language);
   const [internalExpanded, setInternalExpanded] = useState(
     defaultExpanded ?? issues.length > 0,
   );
@@ -77,7 +78,7 @@ export function GameSafetyPanel({
         >
           {issues.length > 0 ? <AlertIcon size={16} /> : <ShieldCheckIcon size={16} />}
         </span>
-        <span className={styles.safetyHeading}>Game project checks</span>
+        <span className={styles.safetyHeading}>{copy.checksHeading}</span>
         <CounterLabel aria-hidden="true">{issues.length}</CounterLabel>
         <ChevronDownIcon
           className={styles.safetyChevron}
@@ -97,13 +98,13 @@ export function GameSafetyPanel({
           {issues.length === 0 ? (
             <div className={styles.safetyEmpty}>
               <ShieldCheckIcon size={18} aria-hidden="true" />
-              <span>No game project safety issues.</span>
+              <span>{copy.noProjectIssues}</span>
             </div>
           ) : (
             <ul className={styles.issueList}>
               {issues.map((issue, index) => {
                 const Icon = issueIcons[issue.kind];
-                const label = issueLabels[issue.kind];
+                const label = getLocalizedIssueLabel(issue.kind, language);
 
                 return (
                   <li
@@ -117,9 +118,11 @@ export function GameSafetyPanel({
                     <div className={styles.issueBody}>
                       <div className={styles.issueTitleRow}>
                         <strong>{label}</strong>
-                        <span className={styles.severity}>{issue.severity}</span>
+                        <span className={styles.severity}>
+                          {getLocalizedSeverity(issue.severity, language)}
+                        </span>
                       </div>
-                      <p>{issue.message}</p>
+                      <p>{localizeGameIssueMessage(issue.message, language)}</p>
                       <code title={issue.path}>{issue.path}</code>
                     </div>
                   </li>

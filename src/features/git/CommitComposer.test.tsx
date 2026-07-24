@@ -132,9 +132,13 @@ describe("CommitComposer", () => {
       />,
     );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Generate commit message with AI" }),
-    );
+    const generateButton = screen.getByRole("button", {
+      name: "Generate commit message with AI",
+    });
+    expect(generateButton).toHaveTextContent("AI");
+    expect(generateButton).not.toHaveTextContent("Generate");
+    expect(generateButton.querySelector("svg")).toBeNull();
+    fireEvent.click(generateButton);
     expect(onGenerate).toHaveBeenCalledTimes(1);
 
     rerender(

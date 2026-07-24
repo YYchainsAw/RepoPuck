@@ -6,6 +6,8 @@ import {
   useState,
   type PropsWithChildren,
 } from "react";
+import { useI18n } from "../../i18n";
+import { getGitCopy, localizeGitMessage } from "../../i18n/git";
 import { createGitClient } from "./client";
 import type {
   AiCommitPreferences,
@@ -92,6 +94,31 @@ const snapshotsEqual = (
     );
   });
 
+const normalizeGameMetadata = (
+  snapshot: RepositorySnapshot,
+): RepositorySnapshot => {
+  const engine = snapshot.gameProject?.engine;
+  const gameProjectDetected = engine === "unity" || engine === "unreal";
+  if (gameProjectDetected) return snapshot;
+
+  const hasGameMetadata =
+    snapshot.gameProject !== undefined ||
+    snapshot.gameSafetyIssues !== undefined ||
+    snapshot.changes.some((change) => change.gameCategory !== undefined);
+  if (!hasGameMetadata) return snapshot;
+
+  return {
+    ...snapshot,
+    gameProject: undefined,
+    gameSafetyIssues: undefined,
+    changes: snapshot.changes.map((change) => {
+      const plainChange = { ...change };
+      delete plainChange.gameCategory;
+      return plainChange;
+    }),
+  };
+};
+
 interface RefreshFlight {
   client: GitClient;
   generation: number;
@@ -121,12 +148,44 @@ interface PendingRefresh {
   generation: number;
 }
 
+type Feedback =
+  | { kind: "message"; message: string }
+  | { kind: "actionFailed"; action: GitAction }
+  | {
+      kind: "aiGenerated";
+      truncated: boolean;
+      excludedFileCount: number;
+    };
+
+const formatFeedback = (
+  feedback: Feedback | null,
+  language: ReturnType<typeof useI18n>["language"],
+): string | null => {
+  if (!feedback) return null;
+  const copy = getGitCopy(language);
+  if (feedback.kind === "message") {
+    return localizeGitMessage(feedback.message, language);
+  }
+  if (feedback.kind === "actionFailed") {
+    return copy.actionFailed(feedback.action);
+  }
+
+  const details = [
+    feedback.truncated ? copy.stagedDiffTruncated : null,
+    feedback.excludedFileCount > 0
+      ? copy.sensitiveFilesExcluded(feedback.excludedFileCount)
+      : null,
+  ].filter((detail): detail is string => detail !== null);
+  return copy.generated(details);
+};
+
 export function GitProvider({
   children,
   client: injectedClient,
   visible = true,
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
 }: GitProviderProps) {
+  const { language } = useI18n();
   const client = useMemo(
     () => injectedClient ?? createGitClient(),
     [injectedClient],
@@ -138,9 +197,11 @@ export function GitProvider({
   const [commitMessage, setCommitMessage] = useState("");
   const [busyAction, setBusyAction] = useState<GitAction | null>(null);
   const [generatingCommitMessage, setGeneratingCommitMessage] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [noticeFeedback, setNoticeFeedback] = useState<Feedback | null>(null);
+  const [actionErrorFeedback, setActionErrorFeedback] =
+    useState<Feedback | null>(null);
+  const [refreshErrorFeedback, setRefreshErrorFeedback] =
+    useState<Feedback | null>(null);
   const mutationRef = useRef<MutationFlight | null>(null);
   const aiGenerationRef = useRef<AiGenerationFlight | null>(null);
   const mountedRef = useRef(false);
@@ -174,7 +235,9 @@ export function GitProvider({
       };
       flight.promise = Promise.resolve().then(async () => {
         try {
-          const nextSnapshot = await targetClient.getSnapshot();
+          const nextSnapshot = normalizeGameMetadata(
+            await targetClient.getSnapshot(),
+          );
           if (!isCurrent()) return;
           setSnapshot((current) =>
             snapshotsEqual(current, nextSnapshot) ? current : nextSnapshot,
@@ -184,16 +247,16 @@ export function GitProvider({
               ? current
               : nextSnapshot.repository,
           );
-          setRefreshError(null);
+          setRefreshErrorFeedback(null);
         } catch (reason) {
           if (!isCurrent()) return;
           const message = getErrorMessage(reason);
           if (/^No repository is selected[.!]?$/i.test(message)) {
             setSnapshot(null);
             setSelectedRepository(null);
-            setRefreshError(null);
+            setRefreshErrorFeedback(null);
           } else {
-            setRefreshError(message);
+            setRefreshErrorFeedback({ kind: "message", message });
           }
         } finally {
           if (inFlightRef.current === flight) {
@@ -260,8 +323,8 @@ export function GitProvider({
       aiGenerationRef.current = null;
       setGeneratingCommitMessage(false);
     }
-    setActionError(null);
-    setNotice(null);
+    setActionErrorFeedback(null);
+    setNoticeFeedback(null);
     if (!visible) return;
 
     void performRefresh(client, generation);
@@ -333,16 +396,18 @@ export function GitProvider({
 
       mutationRef.current = mutation;
       setBusyAction(action);
-      setActionError(null);
-      setNotice(null);
+      setActionErrorFeedback(null);
+      setNoticeFeedback(null);
 
       try {
         const result = await operation(targetClient);
         if (!isCurrent()) return false;
 
         if (!result.success) {
-          const message = result.message ?? `${action} failed`;
-          setActionError(message);
+          const feedback: Feedback = result.message
+            ? { kind: "message", message: result.message }
+            : { kind: "actionFailed", action };
+          setActionErrorFeedback(feedback);
           if (options.refreshOnFailure) {
             if (
               !(await refreshAfterMutation(
@@ -353,7 +418,7 @@ export function GitProvider({
             ) {
               return false;
             }
-            setActionError(message);
+            setActionErrorFeedback(feedback);
           }
           return false;
         }
@@ -363,11 +428,18 @@ export function GitProvider({
             currentDraft === options.submittedMessage ? "" : currentDraft,
           );
         }
-        setNotice(result.message ?? null);
+        setNoticeFeedback(
+          result.message
+            ? { kind: "message", message: result.message }
+            : null,
+        );
         return await refreshAfterMutation(targetClient, generation, isCurrent);
       } catch (reason) {
         if (!isCurrent()) return false;
-        setActionError(getErrorMessage(reason));
+        setActionErrorFeedback({
+          kind: "message",
+          message: getErrorMessage(reason),
+        });
         return false;
       } finally {
         if (isCurrent()) {
@@ -414,8 +486,8 @@ export function GitProvider({
 
       aiGenerationRef.current = flight;
       setGeneratingCommitMessage(true);
-      setActionError(null);
-      setNotice(null);
+      setActionErrorFeedback(null);
+      setNoticeFeedback(null);
 
       try {
         const result: GenerateCommitMessageResult =
@@ -423,23 +495,18 @@ export function GitProvider({
         if (!isCurrent()) return false;
 
         setCommitMessage(result.message);
-        const details = [
-          result.truncated ? "The staged diff was truncated." : null,
-          result.excludedFiles.length > 0
-            ? `${result.excludedFiles.length} sensitive ${
-                result.excludedFiles.length === 1 ? "file was" : "files were"
-              } excluded.`
-            : null,
-        ].filter((detail): detail is string => detail !== null);
-        setNotice(
-          details.length > 0
-            ? `AI commit message generated. ${details.join(" ")}`
-            : "AI commit message generated.",
-        );
+        setNoticeFeedback({
+          kind: "aiGenerated",
+          truncated: result.truncated,
+          excludedFileCount: result.excludedFiles.length,
+        });
         return true;
       } catch (reason) {
         if (!isCurrent()) return false;
-        setActionError(getErrorMessage(reason));
+        setActionErrorFeedback({
+          kind: "message",
+          message: getErrorMessage(reason),
+        });
         return false;
       } finally {
         if (isCurrent()) {
@@ -451,6 +518,12 @@ export function GitProvider({
     [],
   );
 
+  const notice = formatFeedback(noticeFeedback, language);
+  const error = formatFeedback(
+    actionErrorFeedback ?? refreshErrorFeedback,
+    language,
+  );
+
   const value = useMemo<GitWorkspaceValue>(
     () => ({
       snapshot,
@@ -459,8 +532,8 @@ export function GitProvider({
       busyAction,
       generatingCommitMessage,
       notice,
-      clearNotice: () => setNotice(null),
-      error: actionError ?? refreshError,
+      clearNotice: () => setNoticeFeedback(null),
+      error,
       refresh,
       setCommitMessage: updateCommitMessage,
       generateCommitMessage,
@@ -520,10 +593,9 @@ export function GitProvider({
       commitMessage,
       generateCommitMessage,
       generatingCommitMessage,
-      actionError,
+      error,
       notice,
       refresh,
-      refreshError,
       runMutation,
       selectedRepository,
       snapshot,

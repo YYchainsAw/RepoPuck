@@ -739,8 +739,14 @@ html[data-window-view="puck"][data-shell-mode="top-drawer"] #root {
 
 .ai-generate-button {
   flex: 0 0 auto;
-  min-height: var(--panel-control-height);
-  white-space: nowrap;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  height: 36px;
+  letter-spacing: 0.02em;
+  min-height: 36px;
+  min-width: 36px;
+  padding-inline: 0 !important;
+  width: 36px;
 }
 
 .composer-actions {

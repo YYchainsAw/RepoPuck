@@ -5,6 +5,8 @@ import {
   DiffRenamedIcon,
 } from "@primer/octicons-react";
 import type { ComponentType } from "react";
+import { useI18n } from "../../i18n";
+import { getGitCopy } from "../../i18n/git";
 import type { ChangeEntry } from "./types";
 
 const kindLabels = {
@@ -28,6 +30,8 @@ interface ChangeRowProps {
 }
 
 export function ChangeRow({ change, busy, onSetStaged }: ChangeRowProps) {
+  const { language } = useI18n();
+  const copy = getGitCopy(language);
   const ChangeIcon = kindIcons[change.kind];
 
   return (
@@ -37,7 +41,7 @@ export function ChangeRow({ change, busy, onSetStaged }: ChangeRowProps) {
         type="checkbox"
         checked={change.staged}
         disabled={busy}
-        aria-label={`${change.staged ? "Unstage" : "Stage"} ${change.path}`}
+        aria-label={`${change.staged ? copy.unstage : copy.stage} ${change.path}`}
         onChange={(event) => onSetStaged([change.path], event.target.checked)}
       />
       <span className={`change-icon change-icon--${change.kind}`} aria-hidden="true">

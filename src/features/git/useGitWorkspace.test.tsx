@@ -120,6 +120,30 @@ describe("useGitWorkspace", () => {
     expect(client.getSnapshot).toHaveBeenCalledTimes(1);
   });
 
+  it("drops stale game metadata unless Unity or Unreal was detected", async () => {
+    const client = createTestClient();
+    client.getSnapshot.mockResolvedValueOnce({
+      ...initialSnapshot,
+      changes: [{ ...initialSnapshot.changes[0], gameCategory: "code" }],
+      gameSafetyIssues: [
+        {
+          kind: "large-file",
+          severity: "warning",
+          path: initialSnapshot.changes[0].path,
+          message: "Stale game warning",
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+    expect(result.current.snapshot?.gameSafetyIssues).toBeUndefined();
+    expect(result.current.snapshot?.changes[0].gameCategory).toBeUndefined();
+  });
+
   it("preserves snapshot identities when refreshed data is structurally unchanged", async () => {
     const client = createTestClient();
     let renderCount = 0;

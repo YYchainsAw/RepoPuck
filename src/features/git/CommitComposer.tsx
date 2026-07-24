@@ -1,10 +1,8 @@
-import {
-  CopilotIcon,
-  GitCommitIcon,
-  UploadIcon,
-} from "@primer/octicons-react";
+import { GitCommitIcon, UploadIcon } from "@primer/octicons-react";
 import { Button, Spinner, TextInput } from "@primer/react";
 import type { KeyboardEvent } from "react";
+import { useI18n } from "../../i18n";
+import { getGitCopy } from "../../i18n/git";
 import type { GitAction } from "./useGitWorkspace";
 
 interface CommitComposerProps {
@@ -28,6 +26,8 @@ export function CommitComposer({
   onCommit,
   onCommitAndPush,
 }: CommitComposerProps) {
+  const { language } = useI18n();
+  const copy = getGitCopy(language);
   const ready = message.trim().length > 0 && hasStaged && !busyAction;
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing || event.key !== "Enter" || !ready) return;
@@ -42,8 +42,8 @@ export function CommitComposer({
         <div className="composer-input-control">
           <TextInput
             className="commit-message"
-            aria-label="Commit message"
-            placeholder="Commit message"
+            aria-label={copy.commitMessage}
+            placeholder={copy.commitMessage}
             value={message}
             maxLength={72}
             disabled={Boolean(busyAction)}
@@ -57,13 +57,13 @@ export function CommitComposer({
         </div>
         <Button
           className="ai-generate-button"
-          aria-label="Generate commit message with AI"
-          title="Generate from staged changes"
-          leadingVisual={generating ? Spinner : CopilotIcon}
+          aria-label={copy.generateCommitMessage}
+          aria-busy={generating}
+          title={copy.generateFromStaged}
           disabled={!hasStaged || Boolean(busyAction) || generating}
           onClick={onGenerate}
         >
-          Generate
+          {generating ? <Spinner size="small" /> : "AI"}
         </Button>
       </div>
       <div className="composer-actions">
@@ -74,7 +74,7 @@ export function CommitComposer({
           disabled={!ready}
           onClick={onCommit}
         >
-          Commit
+          {copy.commit}
         </Button>
         <Button
           className="commit-push-button"
@@ -82,11 +82,11 @@ export function CommitComposer({
           disabled={!ready}
           onClick={onCommitAndPush}
         >
-          Commit &amp; Push
+          {copy.commitAndPush}
         </Button>
       </div>
       {!hasStaged && (
-        <p className="composer-hint">Stage at least one file to commit.</p>
+        <p className="composer-hint">{copy.stageBeforeCommit}</p>
       )}
     </footer>
   );
