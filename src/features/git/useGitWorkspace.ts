@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { RepositorySnapshot } from "./types";
+import type { AiCommitPreferences, RepositorySnapshot } from "./types";
 
 export type GitAction =
   | "selectRepository"
@@ -22,11 +22,13 @@ export interface GitWorkspaceValue {
   selectedRepository: RepositorySnapshot["repository"] | null;
   commitMessage: string;
   busyAction: GitAction | null;
+  generatingCommitMessage: boolean;
   notice: string | null;
   clearNotice(): void;
   error: string | null;
   refresh(): Promise<void>;
   setCommitMessage(message: string): void;
+  generateCommitMessage(request: AiCommitPreferences): Promise<boolean>;
   selectRepository(path: string): Promise<boolean>;
   setStaged(paths: string[], staged: boolean): Promise<boolean>;
   commit(): Promise<boolean>;

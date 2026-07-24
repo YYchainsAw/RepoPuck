@@ -66,11 +66,13 @@ function createWorkspace(overrides: Partial<GitWorkspaceValue> = {}): GitWorkspa
     selectedRepository: snapshot.repository,
     commitMessage: "Ship it",
     busyAction: null,
+    generatingCommitMessage: false,
     notice: null,
     clearNotice: vi.fn(),
     error: null,
     refresh: vi.fn(),
     setCommitMessage: vi.fn(),
+    generateCommitMessage: vi.fn(),
     selectRepository: vi.fn(),
     setStaged: vi.fn(),
     commit: vi.fn(),
@@ -97,6 +99,7 @@ beforeEach(() => {
     colorMode: "light",
     setTheme: vi.fn(),
     setPinned: vi.fn(),
+    setAiCommitPreferences: vi.fn(),
     rememberRepository: vi.fn(),
     clearRecentRepositories: vi.fn(),
   };
@@ -130,6 +133,54 @@ beforeEach(() => {
 });
 
 describe("PanelShell", () => {
+  it("generates a commit message with the saved AI preferences", () => {
+    const generateCommitMessage = vi.fn();
+    workspace.current = createWorkspace({ generateCommitMessage });
+    shell.current = {
+      ...shell.current,
+      settings: {
+        ...shell.current.settings,
+        aiCommit: {
+          baseUrl: "https://example.ai/v1",
+          model: "game-commit-model",
+          language: "zh-CN",
+          commitType: "feat",
+          scope: "unity",
+        },
+      },
+    };
+
+    render(<PanelShell />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Generate commit message with AI" }),
+    );
+
+    expect(generateCommitMessage).toHaveBeenCalledWith({
+      baseUrl: "https://example.ai/v1",
+      model: "game-commit-model",
+      language: "zh-CN",
+      commitType: "feat",
+      scope: "unity",
+    });
+  });
+
+  it("shows AI generation progress without marking a Git action busy", () => {
+    workspace.current = createWorkspace({
+      busyAction: null,
+      generatingCommitMessage: true,
+    });
+
+    render(<PanelShell />);
+
+    expect(screen.getByText("Generating commit message…")).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "RepoPuck Git panel" }),
+    ).toHaveAttribute("aria-busy", "true");
+    expect(
+      screen.getByRole("textbox", { name: "Commit message" }),
+    ).not.toBeDisabled();
+  });
+
   it("shows detected game project context and safety checks above changes", () => {
     workspace.current = createWorkspace({
       snapshot: {

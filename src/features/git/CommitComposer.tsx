@@ -1,4 +1,8 @@
-import { GitCommitIcon, UploadIcon } from "@primer/octicons-react";
+import {
+  CopilotIcon,
+  GitCommitIcon,
+  UploadIcon,
+} from "@primer/octicons-react";
 import { Button, Spinner, TextInput } from "@primer/react";
 import type { KeyboardEvent } from "react";
 import type { GitAction } from "./useGitWorkspace";
@@ -7,7 +11,9 @@ interface CommitComposerProps {
   message: string;
   hasStaged: boolean;
   busyAction: GitAction | null;
+  generating: boolean;
   onMessageChange(message: string): void;
+  onGenerate(): void;
   onCommit(): void;
   onCommitAndPush(): void;
 }
@@ -16,7 +22,9 @@ export function CommitComposer({
   message,
   hasStaged,
   busyAction,
+  generating,
   onMessageChange,
+  onGenerate,
   onCommit,
   onCommitAndPush,
 }: CommitComposerProps) {
@@ -31,20 +39,32 @@ export function CommitComposer({
   return (
     <footer className="commit-composer">
       <div className="composer-input-row">
-        <TextInput
-          className="commit-message"
-          aria-label="Commit message"
-          placeholder="Commit message"
-          value={message}
-          maxLength={72}
-          disabled={Boolean(busyAction)}
-          onChange={(event) => onMessageChange(event.target.value)}
-          onKeyDown={onKeyDown}
-          block
-        />
-        <span className="message-count" aria-live="polite">
-          {message.length} / 72
-        </span>
+        <div className="composer-input-control">
+          <TextInput
+            className="commit-message"
+            aria-label="Commit message"
+            placeholder="Commit message"
+            value={message}
+            maxLength={72}
+            disabled={Boolean(busyAction)}
+            onChange={(event) => onMessageChange(event.target.value)}
+            onKeyDown={onKeyDown}
+            block
+          />
+          <span className="message-count" aria-live="polite">
+            {message.length} / 72
+          </span>
+        </div>
+        <Button
+          className="ai-generate-button"
+          aria-label="Generate commit message with AI"
+          title="Generate from staged changes"
+          leadingVisual={generating ? Spinner : CopilotIcon}
+          disabled={!hasStaged || Boolean(busyAction) || generating}
+          onClick={onGenerate}
+        >
+          Generate
+        </Button>
       </div>
       <div className="composer-actions">
         <Button

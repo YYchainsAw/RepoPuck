@@ -11,6 +11,7 @@ import {
   addRecentRepository,
   applyThemePreference,
   createShellSettingsPersistence,
+  type AICommitPreferences,
   type ShellSettings,
   type ShellSettingsPersistence,
   type ThemePreference,
@@ -22,6 +23,7 @@ export interface ShellSettingsValue {
   colorMode: "light" | "dark";
   setTheme(theme: ThemePreference): void;
   setPinned(pinned: boolean): void;
+  setAiCommitPreferences(preferences: AICommitPreferences): void;
   rememberRepository(path: string): void;
   clearRecentRepositories(): void;
 }
@@ -80,6 +82,8 @@ export function ShellSettingsProvider({
       colorMode,
       setTheme: (theme) => update((current) => ({ ...current, theme })),
       setPinned: (pinned) => update((current) => ({ ...current, pinned })),
+      setAiCommitPreferences: (aiCommit) =>
+        update((current) => ({ ...current, aiCommit })),
       rememberRepository: (path) => update((current) => addRecentRepository(current, path)),
       clearRecentRepositories: () =>
         update((current) =>

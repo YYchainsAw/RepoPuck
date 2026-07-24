@@ -708,6 +708,14 @@ html[data-window-view="puck"][data-shell-mode="top-drawer"] #root {
 }
 
 .composer-input-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.composer-input-control {
+  flex: 1 1 auto;
+  min-width: 0;
   position: relative;
 }
 
@@ -727,6 +735,12 @@ html[data-window-view="puck"][data-shell-mode="top-drawer"] #root {
   right: 10px;
   top: 50%;
   transform: translateY(-50%);
+}
+
+.ai-generate-button {
+  flex: 0 0 auto;
+  min-height: var(--panel-control-height);
+  white-space: nowrap;
 }
 
 .composer-actions {

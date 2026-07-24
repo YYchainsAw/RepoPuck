@@ -7,7 +7,13 @@ import {
   type PropsWithChildren,
 } from "react";
 import { createGitClient } from "./client";
-import type { GitClient, OperationResult, RepositorySnapshot } from "./types";
+import type {
+  AiCommitPreferences,
+  GenerateCommitMessageResult,
+  GitClient,
+  OperationResult,
+  RepositorySnapshot,
+} from "./types";
 import {
   GitWorkspaceContext,
   type GitAction,
@@ -99,6 +105,12 @@ interface MutationFlight {
   generation: number;
 }
 
+interface AiGenerationFlight {
+  token: symbol;
+  client: GitClient;
+  generation: number;
+}
+
 interface MutationOptions {
   submittedMessage?: string;
   refreshOnFailure?: boolean;
@@ -125,10 +137,12 @@ export function GitProvider({
   >(null);
   const [commitMessage, setCommitMessage] = useState("");
   const [busyAction, setBusyAction] = useState<GitAction | null>(null);
+  const [generatingCommitMessage, setGeneratingCommitMessage] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const mutationRef = useRef<MutationFlight | null>(null);
+  const aiGenerationRef = useRef<AiGenerationFlight | null>(null);
   const mountedRef = useRef(false);
   const generationRef = useRef(0);
   const inFlightRef = useRef<RefreshFlight | null>(null);
@@ -230,6 +244,7 @@ export function GitProvider({
       inFlightRef.current = null;
       pendingRefreshRef.current = null;
       mutationRef.current = null;
+      aiGenerationRef.current = null;
     };
   }, []);
 
@@ -240,6 +255,10 @@ export function GitProvider({
     if (mutationRef.current) {
       mutationRef.current = null;
       setBusyAction(null);
+    }
+    if (aiGenerationRef.current) {
+      aiGenerationRef.current = null;
+      setGeneratingCommitMessage(false);
     }
     setActionError(null);
     setNotice(null);
@@ -290,6 +309,11 @@ export function GitProvider({
         !visibleRef.current
       ) {
         return false;
+      }
+
+      if (aiGenerationRef.current) {
+        aiGenerationRef.current = null;
+        setGeneratingCommitMessage(false);
       }
 
       const targetClient = clientRef.current;
@@ -355,17 +379,91 @@ export function GitProvider({
     [refreshAfterMutation],
   );
 
+  const updateCommitMessage = useCallback((message: string) => {
+    if (aiGenerationRef.current) {
+      aiGenerationRef.current = null;
+      setGeneratingCommitMessage(false);
+    }
+    setCommitMessage(message);
+  }, []);
+
+  const generateCommitMessage = useCallback(
+    async (request: AiCommitPreferences): Promise<boolean> => {
+      if (
+        aiGenerationRef.current ||
+        mutationRef.current ||
+        !mountedRef.current ||
+        !visibleRef.current
+      ) {
+        return false;
+      }
+
+      const targetClient = clientRef.current;
+      const generation = generationRef.current;
+      const flight: AiGenerationFlight = {
+        token: Symbol("generateCommitMessage"),
+        client: targetClient,
+        generation,
+      };
+      const isCurrent = () =>
+        mountedRef.current &&
+        visibleRef.current &&
+        clientRef.current === targetClient &&
+        generationRef.current === generation &&
+        aiGenerationRef.current?.token === flight.token;
+
+      aiGenerationRef.current = flight;
+      setGeneratingCommitMessage(true);
+      setActionError(null);
+      setNotice(null);
+
+      try {
+        const result: GenerateCommitMessageResult =
+          await targetClient.generateCommitMessage(request);
+        if (!isCurrent()) return false;
+
+        setCommitMessage(result.message);
+        const details = [
+          result.truncated ? "The staged diff was truncated." : null,
+          result.excludedFiles.length > 0
+            ? `${result.excludedFiles.length} sensitive ${
+                result.excludedFiles.length === 1 ? "file was" : "files were"
+              } excluded.`
+            : null,
+        ].filter((detail): detail is string => detail !== null);
+        setNotice(
+          details.length > 0
+            ? `AI commit message generated. ${details.join(" ")}`
+            : "AI commit message generated.",
+        );
+        return true;
+      } catch (reason) {
+        if (!isCurrent()) return false;
+        setActionError(getErrorMessage(reason));
+        return false;
+      } finally {
+        if (isCurrent()) {
+          aiGenerationRef.current = null;
+          setGeneratingCommitMessage(false);
+        }
+      }
+    },
+    [],
+  );
+
   const value = useMemo<GitWorkspaceValue>(
     () => ({
       snapshot,
       selectedRepository,
       commitMessage,
       busyAction,
+      generatingCommitMessage,
       notice,
       clearNotice: () => setNotice(null),
       error: actionError ?? refreshError,
       refresh,
-      setCommitMessage,
+      setCommitMessage: updateCommitMessage,
+      generateCommitMessage,
       selectRepository: (path) =>
         runMutation("selectRepository", (targetClient) =>
           targetClient.selectRepository(path),
@@ -420,6 +518,8 @@ export function GitProvider({
       busyAction,
       client,
       commitMessage,
+      generateCommitMessage,
+      generatingCommitMessage,
       actionError,
       notice,
       refresh,
@@ -427,6 +527,7 @@ export function GitProvider({
       runMutation,
       selectedRepository,
       snapshot,
+      updateCommitMessage,
     ],
   );
 

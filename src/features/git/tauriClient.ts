@@ -1,5 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { GitClient, OperationResult, RepositorySnapshot } from "./types";
+import type {
+  GenerateCommitMessageResult,
+  GitClient,
+  OperationResult,
+  RepositorySnapshot,
+} from "./types";
 
 const operation = (command: string, args?: Record<string, unknown>) =>
   args
@@ -16,6 +21,10 @@ export function createTauriGitClient(): GitClient {
     stage: (paths) => operation("set_staged", { paths, staged: true }),
     unstage: (paths) => operation("set_staged", { paths, staged: false }),
     commit: (message) => operation("commit", { message }),
+    generateCommitMessage: (request) =>
+      invoke<GenerateCommitMessageResult>("generate_commit_message", {
+        request,
+      }),
     amendLastCommit: (message) => operation("amend_last_commit", { message }),
     push: () => operation("push"),
     commitAndPush: (message) => operation("commit_and_push", { message }),

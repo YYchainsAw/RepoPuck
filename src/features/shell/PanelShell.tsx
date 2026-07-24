@@ -11,6 +11,7 @@ import { Header } from "./Header";
 import { createNativeShellClient } from "./nativeClient";
 import { Notice } from "./Notice";
 import { SettingsDialog } from "./SettingsDialog";
+import { getAICommitPreferences } from "./settings";
 import { useShellSettings } from "./ShellSettingsProvider";
 import { useNativeShellState } from "./useNativeShellState";
 
@@ -118,6 +119,12 @@ export function PanelShell() {
           <span>{busyLabels[workspace.busyAction]}</span>
         </div>
       )}
+      {workspace.generatingCommitMessage && (
+        <div className="busy-status" aria-live="polite">
+          <Spinner size="small" />
+          <span>Generating commit message…</span>
+        </div>
+      )}
     </>
   );
 
@@ -128,7 +135,7 @@ export function PanelShell() {
           className="panel-shell panel-shell--responsive"
           role="region"
           aria-label="RepoPuck Git panel"
-          aria-busy={busy}
+          aria-busy={busy || workspace.generatingCommitMessage}
           data-color-mode={dark ? "dark" : "light"}
           data-pinned={pinned}
           data-min-width="360"
@@ -209,7 +216,13 @@ export function PanelShell() {
                 message={workspace.commitMessage}
                 hasStaged={workspace.snapshot.changes.some((change) => change.staged)}
                 busyAction={workspace.busyAction}
+                generating={workspace.generatingCommitMessage}
                 onMessageChange={workspace.setCommitMessage}
+                onGenerate={() =>
+                  void workspace.generateCommitMessage(
+                    getAICommitPreferences(shell.settings),
+                  )
+                }
                 onCommit={() => void workspace.commit()}
                 onCommitAndPush={() => void workspace.commitAndPush()}
               />
