@@ -33,6 +33,19 @@ struct IndexBlob {
     size: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StagedAiContext {
+    pub content: String,
+    pub truncated: bool,
+    pub excluded_files: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct StagedAiFile {
+    patch_path: String,
+    checked_paths: Vec<String>,
+}
+
 impl GitService {
     pub fn open(path: &Path) -> Result<Self, GitError> {
         if !path.is_dir() {
@@ -153,6 +166,122 @@ impl GitService {
         self.runner
             .run(["branch", "--show-current"])
             .map(|value| text(&value).trim().to_owned())
+    }
+
+    pub fn staged_diff_for_ai(&self) -> Result<StagedAiContext, GitError> {
+        const MAX_CONTEXT_BYTES: usize = 64 * 1024;
+        const MAX_FILES: usize = 200;
+        const MAX_PATHSPEC_BYTES: usize = 12 * 1024;
+        const TRUNCATION_NOTICE: &str =
+            "\n\n[RepoPuck truncated the staged diff to the safe context limit.]";
+
+        let names = self.runner.run([
+            "diff",
+            "--cached",
+            "--name-status",
+            "-z",
+            "--find-renames",
+            "--diff-filter=ACDMRTUXB",
+            "--no-ext-diff",
+            "--no-textconv",
+        ])?;
+        let staged_files = parse_staged_name_status(&names)?;
+        if staged_files.is_empty() {
+            return Err(GitError::safe(
+                "Stage at least one file before generating a commit message",
+            ));
+        }
+
+        let mut excluded_files = Vec::new();
+        let mut allowed_files = Vec::new();
+        for file in staged_files {
+            if file
+                .checked_paths
+                .iter()
+                .any(|path| is_sensitive_ai_path(path))
+            {
+                excluded_files.push(file.patch_path);
+            } else {
+                allowed_files.push(file.patch_path);
+            }
+        }
+        if allowed_files.is_empty() {
+            return Err(GitError::safe(
+                "All staged files were excluded because they may contain secrets",
+            ));
+        }
+
+        let mut content = String::from(
+            "The following data is from the Git staged index only. Binary contents and sensitive paths are omitted.\n",
+        );
+        if !excluded_files.is_empty() {
+            content.push_str(&format!(
+                "{} sensitive staged path(s) were excluded.\n",
+                excluded_files.len()
+            ));
+        }
+        let mut truncated = false;
+
+        let (selected_files, file_selection_truncated) =
+            select_ai_files(allowed_files, MAX_FILES, MAX_PATHSPEC_BYTES);
+        truncated |= file_selection_truncated;
+        if selected_files.is_empty() {
+            return Err(GitError::safe(
+                "Staged file paths exceed the safe AI context limit",
+            ));
+        }
+
+        let numstat = self.runner.run_with_literal_paths(
+            &[
+                "diff",
+                "--cached",
+                "--numstat",
+                "-z",
+                "--no-ext-diff",
+                "--no-textconv",
+            ],
+            &selected_files,
+        )?;
+        let binary_paths = parse_binary_numstat_paths(&numstat)?;
+        for path in &binary_paths {
+            let section = format!("\n--- {path}\n[Binary file changed; content omitted.]\n");
+            let limit_before_notice = MAX_CONTEXT_BYTES.saturating_sub(TRUNCATION_NOTICE.len());
+            if !append_utf8_bounded(&mut content, &section, limit_before_notice) {
+                truncated = true;
+                break;
+            }
+        }
+
+        let text_paths = selected_files
+            .into_iter()
+            .filter(|path| !binary_paths.contains(path))
+            .collect::<Vec<_>>();
+        let limit_before_notice = MAX_CONTEXT_BYTES.saturating_sub(TRUNCATION_NOTICE.len());
+        if !text_paths.is_empty() && content.len() < limit_before_notice {
+            let patch = self.runner.run_with_literal_paths(
+                &[
+                    "diff",
+                    "--cached",
+                    "--unified=3",
+                    "--no-ext-diff",
+                    "--no-textconv",
+                ],
+                &text_paths,
+            )?;
+            let patch = redact_sensitive_patch_lines(&String::from_utf8_lossy(&patch));
+            if !append_utf8_bounded(&mut content, &format!("\n{patch}"), limit_before_notice) {
+                truncated = true;
+            }
+        }
+
+        if truncated {
+            content.push_str(TRUNCATION_NOTICE);
+        }
+        Ok(StagedAiContext {
+            content,
+            truncated,
+            excluded_files,
+        })
     }
 
     pub fn set_staged(&self, paths: &[String], staged: bool) -> Result<(), GitError> {
@@ -736,6 +865,194 @@ impl GitService {
     }
 }
 
+fn select_ai_files(
+    allowed_files: Vec<String>,
+    max_files: usize,
+    max_pathspec_bytes: usize,
+) -> (Vec<String>, bool) {
+    let total_files = allowed_files.len();
+    let mut selected_files = Vec::new();
+    let mut pathspec_bytes = 0usize;
+    let mut truncated = false;
+    for path in allowed_files {
+        if selected_files.len() >= max_files {
+            truncated = true;
+            break;
+        }
+        if path.len() > max_pathspec_bytes {
+            truncated = true;
+            continue;
+        }
+        let next_bytes = pathspec_bytes.saturating_add(path.len());
+        if next_bytes > max_pathspec_bytes {
+            truncated = true;
+            break;
+        }
+        pathspec_bytes = next_bytes;
+        selected_files.push(path);
+    }
+    truncated |= selected_files.len() < total_files;
+    (selected_files, truncated)
+}
+
+fn parse_staged_name_status(output: &[u8]) -> Result<Vec<StagedAiFile>, GitError> {
+    let fields = output
+        .split(|byte| *byte == 0)
+        .filter(|field| !field.is_empty())
+        .collect::<Vec<_>>();
+    let mut files = Vec::new();
+    let mut index = 0;
+    while index < fields.len() {
+        let status = fields[index];
+        index += 1;
+        let kind = status.first().copied().unwrap_or_default();
+        if matches!(kind, b'R' | b'C') {
+            let old_path = fields
+                .get(index)
+                .ok_or_else(|| GitError::safe("Staged Git paths could not be parsed"))?;
+            let new_path = fields
+                .get(index + 1)
+                .ok_or_else(|| GitError::safe("Staged Git paths could not be parsed"))?;
+            index += 2;
+            let old_path = String::from_utf8_lossy(old_path).into_owned();
+            let new_path = String::from_utf8_lossy(new_path).into_owned();
+            files.push(StagedAiFile {
+                patch_path: new_path.clone(),
+                checked_paths: vec![old_path, new_path],
+            });
+        } else {
+            let path = fields
+                .get(index)
+                .ok_or_else(|| GitError::safe("Staged Git paths could not be parsed"))?;
+            index += 1;
+            let path = String::from_utf8_lossy(path).into_owned();
+            files.push(StagedAiFile {
+                patch_path: path.clone(),
+                checked_paths: vec![path],
+            });
+        }
+    }
+    Ok(files)
+}
+
+fn parse_binary_numstat_paths(output: &[u8]) -> Result<HashSet<String>, GitError> {
+    let fields = output.split(|byte| *byte == 0).collect::<Vec<_>>();
+    let mut binary_paths = HashSet::new();
+    let mut index = 0;
+    while index < fields.len() {
+        let field = fields[index];
+        index += 1;
+        if field.is_empty() {
+            continue;
+        }
+        let mut columns = field.splitn(3, |byte| *byte == b'\t');
+        let additions = columns.next().unwrap_or_default();
+        let deletions = columns.next().unwrap_or_default();
+        let path = columns
+            .next()
+            .ok_or_else(|| GitError::safe("Staged Git statistics could not be parsed"))?;
+        let binary = additions == b"-" && deletions == b"-";
+        if path.is_empty() {
+            // With -z, rename/copy numstat stores old and new paths in the next two fields.
+            let _old_path = fields
+                .get(index)
+                .ok_or_else(|| GitError::safe("Staged Git statistics could not be parsed"))?;
+            let new_path = fields
+                .get(index + 1)
+                .ok_or_else(|| GitError::safe("Staged Git statistics could not be parsed"))?;
+            index += 2;
+            if binary {
+                binary_paths.insert(String::from_utf8_lossy(new_path).into_owned());
+            }
+        } else if binary {
+            binary_paths.insert(String::from_utf8_lossy(path).into_owned());
+        }
+    }
+    Ok(binary_paths)
+}
+
+fn append_utf8_bounded(target: &mut String, value: &str, limit: usize) -> bool {
+    let remaining = limit.saturating_sub(target.len());
+    if value.len() <= remaining {
+        target.push_str(value);
+        return true;
+    }
+    let mut boundary = remaining.min(value.len());
+    while boundary > 0 && !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    target.push_str(&value[..boundary]);
+    false
+}
+
+fn is_sensitive_ai_path(path: &str) -> bool {
+    let normalized = path.replace('\\', "/").to_ascii_lowercase();
+    let components = normalized.split('/').collect::<Vec<_>>();
+    let name = components.last().copied().unwrap_or_default();
+    let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+
+    name == ".env"
+        || name.starts_with(".env.")
+        || matches!(
+            name,
+            ".npmrc"
+                | ".pypirc"
+                | ".netrc"
+                | "_netrc"
+                | "auth.json"
+                | "id_rsa"
+                | "id_dsa"
+                | "id_ecdsa"
+                | "id_ed25519"
+        )
+        || name.ends_with(".pem")
+        || name.ends_with(".key")
+        || name.ends_with(".p12")
+        || name.ends_with(".pfx")
+        || name.starts_with("service-account")
+        || stem.contains("credential")
+        || stem.contains("secret")
+        || components.iter().any(|component| {
+            matches!(
+                *component,
+                "credentials" | "credential" | "secrets" | "secret"
+            )
+        })
+}
+
+fn redact_sensitive_patch_lines(patch: &str) -> String {
+    patch
+        .lines()
+        .map(|line| {
+            let lower = line.to_ascii_lowercase();
+            let sensitive = [
+                "api_key",
+                "apikey",
+                "access_token",
+                "auth_token",
+                "client_secret",
+                "private_key",
+                "password",
+                "authorization:",
+                "bearer ",
+                "github_pat_",
+                "ghp_",
+                "xoxb-",
+                "akia",
+                "-----begin private key-----",
+            ]
+            .iter()
+            .any(|marker| lower.contains(marker));
+            if sensitive && !line.starts_with("diff --git ") {
+                "[RepoPuck redacted a potentially sensitive line]"
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn text(output: &[u8]) -> String {
     String::from_utf8_lossy(output).into_owned()
 }
@@ -947,7 +1264,11 @@ mod tests {
         FileCategory, GameEngine, ProjectRiskKind, GIT_HOST_HARD_LIMIT_BYTES,
     };
 
-    use super::{game_relative_path, is_lfs_pointer, parse_lfs_attributes, GitService};
+    use super::{
+        game_relative_path, is_lfs_pointer, is_sensitive_ai_path, parse_binary_numstat_paths,
+        parse_lfs_attributes, parse_staged_name_status, redact_sensitive_patch_lines,
+        select_ai_files, GitService,
+    };
 
     static NEXT_REPOSITORY: AtomicU64 = AtomicU64::new(0);
 
@@ -1051,6 +1372,100 @@ mod tests {
                 .canonicalize()
                 .expect("canonical fixture root")
         );
+    }
+
+    #[test]
+    fn ai_context_uses_only_staged_text_and_excludes_sensitive_rename_sources() {
+        let repository = TestRepository::new();
+        fs::write(repository.path.join(".env"), "API_KEY=must-not-leak\n")
+            .expect("write sensitive fixture");
+        repository.git(&["add", "--", ".env"]);
+        repository.git(&["commit", "-m", "add sensitive fixture"]);
+        repository.git(&["mv", "--", ".env", "config.ts"]);
+        fs::write(repository.path.join("tracked.txt"), "safe staged change\n")
+            .expect("modify safe fixture");
+        repository.git(&["add", "--", "tracked.txt"]);
+        let service = GitService::open(&repository.path).expect("valid repository");
+
+        let context = service.staged_diff_for_ai().expect("AI staged context");
+
+        assert_eq!(context.excluded_files, vec!["config.ts"]);
+        assert!(context.content.contains("safe staged change"));
+        assert!(!context.content.contains(".env"));
+        assert!(!context.content.contains("must-not-leak"));
+    }
+
+    #[test]
+    fn ai_context_omits_binary_contents_and_caps_large_file_sets() {
+        let repository = TestRepository::new();
+        fs::write(
+            repository.path.join("asset.bin"),
+            b"\0private-binary-content",
+        )
+        .expect("write binary fixture");
+        repository.git(&["add", "--", "asset.bin"]);
+        for index in 0..201 {
+            let name = format!("file-{index:03}.txt");
+            fs::write(repository.path.join(&name), format!("change {index}\n"))
+                .expect("write text fixture");
+        }
+        repository.git(&["add", "--", "."]);
+        let service = GitService::open(&repository.path).expect("valid repository");
+
+        let context = service.staged_diff_for_ai().expect("AI staged context");
+
+        assert!(context.truncated);
+        assert!(context
+            .content
+            .contains("Binary file changed; content omitted"));
+        assert!(!context.content.contains("private-binary-content"));
+        assert!(context.content.len() <= 64 * 1024);
+    }
+
+    #[test]
+    fn staged_name_status_parser_checks_both_sides_of_renames() {
+        let parsed = parse_staged_name_status(b"R100\0.env\0src/config.ts\0M\0safe.txt\0")
+            .expect("parse staged names");
+
+        assert_eq!(parsed[0].patch_path, "src/config.ts");
+        assert_eq!(parsed[0].checked_paths, vec![".env", "src/config.ts"]);
+        assert!(parsed[0]
+            .checked_paths
+            .iter()
+            .any(|path| is_sensitive_ai_path(path)));
+        assert_eq!(parsed[1].patch_path, "safe.txt");
+    }
+
+    #[test]
+    fn binary_numstat_parser_handles_regular_and_renamed_paths() {
+        let parsed = parse_binary_numstat_paths(b"-\t-\tasset.bin\0-\t-\t\0old.bin\0new.bin\0")
+            .expect("parse binary stats");
+
+        assert!(parsed.contains("asset.bin"));
+        assert!(parsed.contains("new.bin"));
+    }
+
+    #[test]
+    fn ai_patch_redaction_removes_common_secret_assignments() {
+        let patch = "+api_key = \"sk-private\"\n+safe_value = 42\n context password=hidden";
+        let redacted = redact_sensitive_patch_lines(patch);
+
+        assert!(!redacted.contains("sk-private"));
+        assert!(!redacted.contains("hidden"));
+        assert!(redacted.contains("safe_value = 42"));
+    }
+
+    #[test]
+    fn ai_file_selection_never_falls_back_to_an_unscoped_diff() {
+        let (selected, truncated) =
+            select_ai_files(vec!["x".repeat(20), "safe.txt".to_owned()], 200, 12);
+
+        assert_eq!(selected, vec!["safe.txt"]);
+        assert!(truncated);
+
+        let (selected, truncated) = select_ai_files(vec!["x".repeat(20)], 200, 12);
+        assert!(selected.is_empty());
+        assert!(truncated);
     }
 
     #[test]
