@@ -4,7 +4,7 @@
   <h1>RepoPuck</h1>
 
   <p><strong>随时在桌面，提交只需几秒。</strong></p>
-  <p>面向 Unity、Unreal Engine 与 Visual Studio 工作流的轻量 Windows 桌面 Git 助手。</p>
+  <p>轻量 Windows 桌面 Git 助手；检测到 Unity 或 Unreal 项目时按需增强。</p>
 
   <p>
     <strong>简体中文</strong>
@@ -31,7 +31,7 @@
 
 <br>
 
-RepoPuck 把最常用的 Git 操作放在一个随叫随到的小面板里。选择文件、切换分支、提交和推送，不必反复离开 Unity、Unreal Editor、Visual Studio 或当前工作窗口，也不必为了一个小提交打开完整 Git 客户端。
+RepoPuck 把最常用的 Git 操作放在一个随叫随到的小面板里。无论是普通代码仓库、Visual Studio 解决方案还是游戏项目，都可以选择文件、切换分支、提交和推送，而不必为了一个小提交打开完整 Git 客户端。
 
 > [!IMPORTANT]
 > **使用 RepoPuck 不需要安装 Unity 包或 Unreal 插件。** 手动选择项目后，游戏项目识别、文件分类和安全检查即可工作。仓库内附带的编辑器桥接仅用于“打开编辑器时自动唤醒 RepoPuck”，完全可选。
@@ -44,16 +44,19 @@ RepoPuck 把最常用的 Git 操作放在一个随叫随到的小面板里。选
 
 - ⚡ **更短的提交路径**：勾选文件，输入说明，然后分别选择 **Commit** 或 **Commit & Push**。
 - 🤖 **AI 提交信息草稿**：使用自己的 OpenAI 兼容 API，根据已暂存变更生成中文或英文的 Conventional Commit。
-- 🎮 **为游戏开发准备**：识别 Unity 和 Unreal 项目，区分代码、场景、蓝图、资源、配置与生成文件。
+- 🎮 **游戏项目按需增强**：仅在识别到 Unity 或 Unreal 项目后，显示语义文件分组与提交前安全提示；普通仓库保持纯粹的 Git 界面。
 - 🧩 **三种桌面形态**：悬浮球、顶部灵动岛、顶部自动展开卷轴，按你的工作习惯切换。
 - 🪶 **轻量而专注**：常用操作直接可见，次要操作收进更多菜单，不试图复制一个完整 IDE。
 - 🌗 **熟悉的 GitHub 风格**：基于 GitHub Primer，支持浅色、深色和跟随系统主题。
+- 🌐 **中文与 English**：默认跟随系统语言，也可随时在设置中手动切换。
 - 🔐 **不绑定 GitHub 账号**：直接复用系统 Git、Git Credential Manager 或 SSH 配置。
 - 🖥️ **Windows 原生体验**：系统托盘、置顶入口、无黑色控制台闪烁、DPI 与多显示器适配、窗口位置恢复。
 
+界面默认跟随 Windows 语言。也可以在 **更多 → 设置 → 界面语言** 中选择 **跟随系统、中文或 English**；面板、悬浮球 / 灵动岛、托盘菜单和原生确认对话框会一起切换，无需重启。
+
 ## 🧭 三种桌面模式
 
-在 **更多 → Settings → Launch mode** 中选择模式。三种模式共享同一个 Git 工作区；切换外观不会改变当前仓库、暂存文件或提交草稿。
+在 **更多 → 设置 → 启动模式** 中选择模式。三种模式共享同一个 Git 工作区；切换外观不会改变当前仓库、暂存文件或提交草稿。
 
 | 模式 | 交互方式 | 适合场景 |
 | --- | --- | --- |
@@ -67,9 +70,9 @@ RepoPuck 把最常用的 Git 操作放在一个随叫随到的小面板里。选
 
 面板可调整大小并分别记忆三种模式的尺寸。顶部卷轴使用原生鼠标热区，而不是覆盖桌面的透明网页窗口；隐藏后不会挡住顶部区域的点击。
 
-## 🎮 面向 Unity、Unreal 与 Visual Studio
+## 🎮 检测到游戏项目后按需增强
 
-RepoPuck 对普通 Git 仓库保持简单，对游戏项目则提供额外的只读分析。
+RepoPuck 的默认定位始终是轻量 Git 工具。普通仓库只显示通用 Git 功能；只有检测到 Unity 或 Unreal 项目的明确结构后，才会出现游戏项目横幅、语义文件分组和额外的只读安全分析。
 
 ### 项目识别
 
@@ -129,10 +132,10 @@ RepoPuck 有意不提供 Merge、Rebase、Cherry-pick、破坏性 Reset、冲突
 
 AI 功能完全可选，不影响手动提交：
 
-1. 打开 **更多 → Settings → AI commit message**。
+1. 打开 **更多 → 设置 → AI 提交信息**。
 2. 填写 OpenAI 兼容服务的 Base URL、模型名称和 API Key。
 3. 选择中文或英文、提交类型（例如 `feat`、`fix`、`docs`），并按需填写 scope。
-4. 暂存文件后，在提交框旁点击 **Generate with AI**。生成结果只会填入草稿，不会自动 Commit 或 Push。
+4. 暂存文件后，点击提交框旁紧凑的 **AI** 按钮。生成结果只会填入草稿，不会自动 Commit 或 Push。
 
 RepoPuck 在本地强制组装 Conventional Commit 格式，因此可以稳定得到 `feat: 说明` 或 `feat(ui): 说明`。你仍可在提交前自由编辑结果。
 
@@ -273,6 +276,7 @@ pnpm tauri build --bundles msi
 - [x] 📜 可移动、自动展开的顶部卷轴
 - [x] 📐 可调整并按模式记忆的面板尺寸
 - [x] 🌗 浅色、深色和跟随系统主题
+- [x] 🌍 跟随系统或手动切换的简体中文 / English 界面
 - [x] ✅ 常用 Git 提交、推送、同步和分支工作流
 - [x] 🎮 Unity / Unreal 项目识别与语义文件分组
 - [x] 🛡️ `.meta`、生成文件、大文件和 Git LFS 风险提示
@@ -282,7 +286,6 @@ pnpm tauri build --bundles msi
 - [ ] 🔏 Windows 代码签名
 - [ ] ⌨️ 可配置的全局快捷键
 - [ ] 🔔 可选 Push / Fetch 通知
-- [ ] 🌍 应用界面多语言
 
 路线图会根据真实工作流反馈调整。欢迎通过 [Issues](https://github.com/YYchainsAw/RepoPuck/issues) 提交聚焦的需求和问题。
 

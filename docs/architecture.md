@@ -165,13 +165,14 @@ The frontend lives under `src/` and owns presentation plus short-lived interacti
 
 | Area | Responsibility |
 | --- | --- |
-| `src/App.tsx` and `src/main.tsx` | Select the panel or launcher view, load settings and native state before rendering, and avoid an initial flash of the wrong shell mode. |
+| `src/App.tsx` and `src/main.tsx` | Select the panel or launcher view, load settings and native state before rendering, install the interface-language provider, and avoid an initial flash of the wrong shell mode or locale. |
 | `src/features/shell/useNativeShellState.tsx` | Validate the native wire format, query the initial snapshot, subscribe to shell-state and transition events, expose `setMode`, and acknowledge completed transitions. |
 | `src/features/shell/PuckWindow.tsx`, `Puck.tsx`, and `TopIsland.tsx` | Reuse the launcher WebView for puck and island modes, toggle the panel, and run only the lightweight change-count lifecycle. |
 | `src/features/shell/PanelWindow.tsx` | Observe `PanelPhase`, host mode-specific open/close motion, keep Git polling tied to visibility, expose resize handles, and lazy-load the panel UI. |
 | `src/features/shell/PanelShell.tsx` and `DrawerDragHandle.tsx` | Provide one shared Git interface for all three modes, insert game-project context above the change list when detected, and expose the drawer-only native drag affordance without duplicating the workspace. |
-| `src/features/shell/SettingsDialog.tsx` | Select the shell mode; edit theme, pin, recent repositories, and non-secret AI preferences; save or remove the AI key through dedicated native commands without reading it back. |
-| `src/features/game/` | Render the Unity/Unreal project banner and accessible, collapsible safety summary for the risk records supplied by Rust. |
+| `src/features/shell/SettingsDialog.tsx` | Select the shell mode and interface language; edit theme, pin, recent repositories, and non-secret AI preferences; save or remove the AI key through dedicated native commands without reading it back. |
+| `src/i18n/` | Resolve `system`, `zh-CN`, or `en`; provide typed Git, game, and shell copy; localize known native diagnostics; and validate the cross-WebView `interface_language_changed` contract. |
+| `src/features/game/` | Render the Unity/Unreal project banner and accessible, collapsible safety summary only when Rust positively identifies the selected folder as a game project. Generic repositories do not mount this UI. |
 | `src/features/git/ChangeGroups.tsx` | Keep generic repositories split into tracked and unversioned changes; for detected game projects, split tracked or staged paths into semantic engine categories while preserving unversioned files as their own group. |
 | `src/features/git/types.ts` | Define JSON-compatible repository, branch, change, game-project, risk, AI-generation, and operation types. |
 | `src/features/git/client.ts` | Define the `GitClient` contract and runtime client selection. |
@@ -179,7 +180,7 @@ The frontend lives under `src/` and owns presentation plus short-lived interacti
 | `src/features/git/tauriClient.ts` | Translate typed `GitClient` calls into Tauri commands. |
 | `src/features/git/GitProvider.tsx` and `useGitWorkspace.ts` | Manage snapshot refresh, polling, mutation serialization, editable drafts, stale AI-response rejection, and notices or errors. |
 
-Each WebView has its own `NativeShellStateProvider`. The provider subscribes before accepting a one-time state query, tracks event revisions to prevent a slower query from overwriting a newer event, and normalizes every payload at the boundary. Mode changes are read back from Rust rather than applied optimistically in React.
+Each WebView has its own `NativeShellStateProvider` and `ShellSettingsProvider`. Native shell state subscribes before accepting a one-time query, tracks event revisions to prevent a slower query from overwriting a newer event, and normalizes every payload at the boundary. Interface-language changes are broadcast as a validated preference plus resolved language, so the panel, puck or island, native tray, and dialogs update without a restart. Mode changes are read back from Rust rather than applied optimistically in React.
 
 UI components never spawn Git or read the filesystem directly. Git-facing components consume workspace actions; native-shell components consume typed native clients. This keeps browser tests meaningful and makes native capabilities explicit.
 
@@ -192,7 +193,7 @@ The native code lives under `src-tauri/src/`.
 | `ai.rs` | Validate AI settings, access the per-user Windows credential, call the configured Chat Completions endpoint, sanitize its response, and assemble the final Conventional Commit locally. |
 | `commands.rs` | Tauri command boundary, shared repository state, blocking-task dispatch, and serializable responses. |
 | `external_launch.rs` | Pure parsing and validation for CLI and `repopuck://open` repository requests. |
-| `project_activation.rs` | Startup precedence, caller-relative CLI resolution, protocol-path confirmation, selection-intent ordering, recent-list persistence, and refresh signaling. |
+| `project_activation.rs` | Startup precedence, caller-relative CLI resolution, localized protocol-path confirmation, selection-intent ordering, recent-list persistence, and refresh signaling. |
 | `game_projects.rs` | Candidate-root Unity/Unreal detection, engine metadata, semantic path classification, Unity `.meta` integrity checks, and generated/large/LFS risk modeling. |
 | `git/process.rs` | Windows no-console suspended start, Job Object ownership, process-tree termination, and reader cancellation. |
 | `git/runner.rs` | Bounded, non-interactive orchestration of the system `git` binary, stdin batches, and output readers, including literal path batches after `--`. |
@@ -202,7 +203,8 @@ The native code lives under `src-tauri/src/`.
 | `windowing/state.rs` | `ShellMode`, `PanelPhase`, transition IDs, reversible intents, drawer dwell/leave tracking, and per-monitor normalized anchors. |
 | `windowing/drawer.rs` | Windows cursor polling, anchor-following per-monitor hot-zone detection, foreground ownership checks, and main-thread drawer intents. |
 | `windowing/position.rs` | Pure physical geometry for puck docking, top attachment, normalized horizontal anchors, hot zones, fitting, and clamping. |
-| `windowing/mod.rs` | Window orchestration, mode changes, transition events, DPI reflow, monitor selection, and native-state persistence. |
+| `windowing/i18n.rs` and `windowing/tray.rs` | Resolve the stored or Windows UI language, validate frontend language events, provide native dialog copy, and update tray menu item text in place. |
+| `windowing/mod.rs` | Window orchestration, mode and language events, transition events, DPI reflow, monitor selection, and native-state persistence. |
 | `windowing/tray.rs` | Tray menu and explicit application lifetime controls. |
 | `lib.rs` | Single-instance and deep-link plugin registration, managed state, command registration, startup, and window-event routing. |
 
@@ -307,7 +309,7 @@ The current command surface covers repository selection and status, staging, com
 
 ## AI commit-message flow and security boundary
 
-AI generation is an optional draft action, not a commit action. The user stages files, chooses a language, Conventional Commit type, optional scope, endpoint, and model, then explicitly selects **Generate**. The frontend sends only those non-secret preferences to `generate_commit_message`; the Rust command obtains the API key internally and returns only the generated message plus truncation and exclusion metadata. A successful response fills the editable 72-character draft and never invokes Commit or Push.
+AI generation is an optional draft action, not a commit action. The user stages files, chooses a language, Conventional Commit type, optional scope, endpoint, and model, then explicitly selects the compact, unbranded **AI** action beside the draft. The frontend sends only those non-secret preferences to `generate_commit_message`; the Rust command obtains the API key internally and returns only the generated message plus truncation and exclusion metadata. A successful response fills the editable 72-character draft and never invokes Commit or Push.
 
 The native path applies these boundaries:
 
@@ -355,6 +357,7 @@ Custom-protocol and CLI arguments are untrusted input. Their parser recognizes o
 The Tauri store contains only local convenience settings:
 
 - `theme`: `system`, `light`, or `dark`.
+- `language`: `system`, `zh-CN`, or `en`. System mode resolves from the host locale and reacts to language changes while the application is running.
 - `pinned`: the panel pin preference used by puck mode.
 - `shellMode`: `puck`, `top-island`, or `top-drawer`.
 - `puckPosition`: monitor name plus work-area-relative puck coordinates.
