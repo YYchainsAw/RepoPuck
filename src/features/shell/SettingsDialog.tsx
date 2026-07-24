@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
-  CopilotIcon,
   KeyAsteriskIcon,
   PinIcon,
   RepoIcon,
@@ -9,14 +8,19 @@ import {
 } from "@primer/octicons-react";
 import { Button, Dialog } from "@primer/react";
 import { useEffect, useState } from "react";
+import { useI18n } from "../../i18n";
+import { getShellCopy, localizeShellError } from "../../i18n/shell";
 import {
   getAICommitPreferences,
+  getLanguagePreference,
   type AICommitLanguage,
   type AICommitPreferences,
   type ConventionalCommitType,
+  type LanguagePreference,
   type ShellSettings,
   type ThemePreference,
 } from "./settings";
+import { LocalizedDialogHeader } from "./LocalizedDialogHeader";
 import { useShellSettings } from "./ShellSettingsProvider";
 import type { ShellMode } from "./useNativeShellState";
 import "./native-shell.css";
@@ -77,7 +81,9 @@ export function SettingsDialog({
   onOpenRecent,
   onClose,
 }: SettingsDialogProps) {
-  const { setAiCommitPreferences } = useShellSettings();
+  const { language } = useI18n();
+  const copy = getShellCopy(language);
+  const { setAiCommitPreferences, setLanguage } = useShellSettings();
   const aiCommit = getAICommitPreferences(settings);
   const [apiKey, setApiKey] = useState("");
   const [apiKeyState, setApiKeyState] = useState<ApiKeyState>("checking");
@@ -158,33 +164,50 @@ export function SettingsDialog({
 
   if (!open) return null;
   return (
-    <Dialog title="Settings" onClose={onClose}>
+    <Dialog
+      title={copy.settings.title}
+      renderHeader={LocalizedDialogHeader}
+      onClose={onClose}
+    >
       <div className="settings-dialog-content">
+        <label className="settings-field" htmlFor="interface-language">
+          <span>{copy.settings.interfaceLanguage}</span>
+          <select
+            id="interface-language"
+            aria-label={copy.settings.interfaceLanguage}
+            value={getLanguagePreference(settings)}
+            onChange={(event) =>
+              setLanguage(event.target.value as LanguagePreference)
+            }
+          >
+            <option value="system">{copy.settings.languageSystem}</option>
+            <option value="zh-CN">{copy.settings.languageChinese}</option>
+            <option value="en">{copy.settings.languageEnglish}</option>
+          </select>
+          <small>{copy.settings.interfaceLanguageHelp}</small>
+        </label>
+
         <fieldset className="shell-mode-fieldset">
-          <legend>Launch mode</legend>
+          <legend>{copy.settings.launchMode}</legend>
           <div
             className="shell-mode-options"
             role="radiogroup"
-            aria-label="Launch mode"
+            aria-label={copy.settings.launchMode}
             aria-busy={shellModePending}
           >
             {(
               [
                 {
                   value: "puck",
-                  label: "Floating puck",
-                  description: "Drag the puck anywhere and open the panel beside it.",
+                  ...copy.settings.launchModes.puck,
                 },
                 {
                   value: "top-island",
-                  label: "Top island",
-                  description: "Keep a compact repository status at the top center.",
+                  ...copy.settings.launchModes["top-island"],
                 },
                 {
                   value: "top-drawer",
-                  label: "Top drawer",
-                  description:
-                    "Reveal at the top edge; keyboard users can open it from the system tray.",
+                  ...copy.settings.launchModes["top-drawer"],
                 },
               ] as const
             ).map((mode) => (
@@ -210,26 +233,26 @@ export function SettingsDialog({
           </div>
           {shellModePending && (
             <p className="shell-mode-feedback" role="status">
-              Applying launch mode…
+              {copy.settings.applyingLaunchMode}
             </p>
           )}
           {shellModeError && (
             <p className="shell-mode-feedback shell-mode-feedback--error" role="alert">
-              {shellModeError}
+              {localizeShellError(shellModeError, language)}
             </p>
           )}
         </fieldset>
 
         <label className="settings-field" htmlFor="shell-theme">
-          <span>Theme</span>
+          <span>{copy.settings.theme}</span>
           <select
             id="shell-theme"
             value={settings.theme}
             onChange={(event) => onThemeChange(event.target.value as ThemePreference)}
           >
-            <option value="system">System</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
+            <option value="system">{copy.settings.themeSystem}</option>
+            <option value="light">{copy.settings.themeLight}</option>
+            <option value="dark">{copy.settings.themeDark}</option>
           </select>
         </label>
 
@@ -242,42 +265,42 @@ export function SettingsDialog({
           />
           <PinIcon size={16} aria-hidden="true" />
           <span>
-            Keep panel on top
+            {copy.settings.keepPanelOnTop}
             {shellMode !== "puck" && (
-              <small>Top modes stay above other windows by design.</small>
+              <small>{copy.settings.topModesStayAbove}</small>
             )}
           </span>
         </label>
 
         <section className="ai-commit-settings" aria-labelledby="ai-commit-settings-title">
           <div className="ai-commit-heading">
-            <CopilotIcon size={20} aria-hidden="true" />
+            <span className="ai-neutral-badge" aria-hidden="true">
+              AI
+            </span>
             <span>
-              <h2 id="ai-commit-settings-title">AI commit message</h2>
-              <small>Generate a Conventional Commit message from staged changes.</small>
+              <h2 id="ai-commit-settings-title">{copy.settings.aiTitle}</h2>
+              <small>{copy.settings.aiDescription}</small>
             </span>
           </div>
 
           <div className="ai-settings-grid">
             <label className="settings-field ai-settings-wide" htmlFor="ai-base-url">
-              <span>AI service base URL</span>
+              <span>{copy.settings.aiBaseUrl}</span>
               <input
                 id="ai-base-url"
                 type="url"
-                aria-label="AI service base URL"
+                aria-label={copy.settings.aiBaseUrl}
                 aria-describedby="ai-base-url-help"
                 inputMode="url"
                 spellCheck={false}
                 value={aiCommit.baseUrl}
                 onChange={(event) => changeAiCommit({ baseUrl: event.target.value })}
               />
-              <small id="ai-base-url-help">
-                OpenAI-compatible; RepoPuck targets <code>/chat/completions</code>.
-              </small>
+              <small id="ai-base-url-help">{copy.settings.aiBaseUrlHelp}</small>
             </label>
 
             <label className="settings-field ai-settings-wide" htmlFor="ai-model">
-              <span>AI model</span>
+              <span>{copy.settings.aiModel}</span>
               <input
                 id="ai-model"
                 type="text"
@@ -288,7 +311,7 @@ export function SettingsDialog({
             </label>
 
             <label className="settings-field" htmlFor="ai-language">
-              <span>Commit language</span>
+              <span>{copy.settings.commitLanguage}</span>
               <select
                 id="ai-language"
                 value={aiCommit.language}
@@ -302,7 +325,7 @@ export function SettingsDialog({
             </label>
 
             <label className="settings-field" htmlFor="ai-commit-type">
-              <span>Commit type</span>
+              <span>{copy.settings.commitType}</span>
               <select
                 id="ai-commit-type"
                 value={aiCommit.commitType}
@@ -321,11 +344,11 @@ export function SettingsDialog({
             </label>
 
             <label className="settings-field ai-settings-wide" htmlFor="ai-scope">
-              <span>Scope (optional)</span>
+              <span>{copy.settings.scopeOptional}</span>
               <input
                 id="ai-scope"
                 type="text"
-                aria-label="Scope (optional)"
+                aria-label={copy.settings.scopeOptional}
                 maxLength={32}
                 spellCheck={false}
                 placeholder="ui"
@@ -333,11 +356,11 @@ export function SettingsDialog({
                 onChange={(event) => changeAiCommit({ scope: event.target.value })}
               />
               <small>
-                Preview:{" "}
+                {copy.settings.preview}:{" "}
                 <code>
                   {aiCommit.commitType}
                   {aiCommit.scope ? `(${aiCommit.scope})` : ""}:{" "}
-                  {aiCommit.language === "zh-CN" ? "生成的提交说明" : "generated subject"}
+                  {copy.settings.generatedSubject[aiCommit.language]}
                 </code>
               </small>
             </label>
@@ -347,16 +370,13 @@ export function SettingsDialog({
             <div className="api-key-heading">
               <KeyAsteriskIcon size={18} aria-hidden="true" />
               <span>
-                <strong>API key</strong>
-                <small>
-                  The key is stored in Windows Credential Manager and is never written to
-                  settings.json.
-                </small>
+                <strong>{copy.settings.apiKey}</strong>
+                <small>{copy.settings.apiKeyDescription}</small>
               </span>
             </div>
             <div className="api-key-controls">
               <label className="sr-only" htmlFor="ai-api-key">
-                AI API key
+                {copy.settings.aiApiKey}
               </label>
               <input
                 id="ai-api-key"
@@ -364,7 +384,9 @@ export function SettingsDialog({
                 autoComplete="off"
                 spellCheck={false}
                 placeholder={
-                  apiKeyState === "saved" ? "Enter a new key to replace it" : "Enter API key"
+                  apiKeyState === "saved"
+                    ? copy.settings.replaceKeyPlaceholder
+                    : copy.settings.enterKeyPlaceholder
                 }
                 value={apiKey}
                 disabled={
@@ -386,7 +408,9 @@ export function SettingsDialog({
                 }
                 onClick={() => void saveApiKey()}
               >
-                {apiKeyState === "saving" ? "Saving…" : "Save key"}
+                {apiKeyState === "saving"
+                  ? copy.settings.saving
+                  : copy.settings.saveKey}
               </Button>
               <Button
                 variant="danger"
@@ -395,7 +419,7 @@ export function SettingsDialog({
                 }
                 onClick={() => void deleteApiKey()}
               >
-                Remove
+                {copy.settings.remove}
               </Button>
             </div>
             {!apiKeyError && (
@@ -409,22 +433,24 @@ export function SettingsDialog({
                     : undefined
                 }
               >
-                {apiKeyState === "checking" && "Checking secure key storage…"}
+                {apiKeyState === "checking" && copy.settings.checkingKeyStorage}
                 {apiKeyState === "saved" && (
                   <>
-                    <ShieldLockIcon size={14} aria-hidden="true" /> API key saved securely.
+                    <ShieldLockIcon size={14} aria-hidden="true" />{" "}
+                    {copy.settings.keySaved}
                   </>
                 )}
-                {apiKeyState === "missing" && "No API key saved yet."}
-                {apiKeyState === "saving" && "Saving to Windows Credential Manager…"}
-                {apiKeyState === "deleting" && "Removing the saved API key…"}
+                {apiKeyState === "missing" && copy.settings.noKeySaved}
+                {apiKeyState === "saving" &&
+                  copy.settings.savingToCredentialManager}
+                {apiKeyState === "deleting" && copy.settings.removingKey}
                 {apiKeyState === "unavailable" &&
-                  "Secure API key storage is available in the RepoPuck desktop app."}
+                  copy.settings.secureStorageDesktopOnly}
               </p>
             )}
             {apiKeyError && (
               <p className="api-key-status api-key-status--error" role="alert">
-                {apiKeyError}
+                {localizeShellError(apiKeyError, language)}
               </p>
             )}
           </div>
@@ -432,35 +458,34 @@ export function SettingsDialog({
           <p className="ai-privacy-notice">
             <ShieldLockIcon size={16} aria-hidden="true" />
             <span>
-              <strong>Privacy:</strong> only when you click Generate, staged text differences
-              are sent to the selected AI service. Known sensitive paths and binary contents
-              are excluded, and common secret-looking lines are redacted.
+              <strong>{copy.settings.privacyTitle}</strong>{" "}
+              {copy.settings.privacyDescription}
             </span>
           </p>
         </section>
 
         <section className="recent-repositories" aria-labelledby="recent-repositories-title">
           <div className="recent-repositories-heading">
-            <h2 id="recent-repositories-title">Recent repositories</h2>
+            <h2 id="recent-repositories-title">{copy.settings.recentRepositories}</h2>
             <Button
               variant="invisible"
               leadingVisual={TrashIcon}
               disabled={settings.recentRepositories.length === 0}
-              aria-label="Clear recent repositories"
+              aria-label={copy.settings.clearRecentRepositories}
               onClick={onClearRecent}
             >
-              Clear
+              {copy.settings.clear}
             </Button>
           </div>
           {settings.recentRepositories.length === 0 ? (
-            <p>No recent repositories.</p>
+            <p>{copy.settings.noRecentRepositories}</p>
           ) : (
             <ul>
               {settings.recentRepositories.map((path) => (
                 <li key={path}>
                   <button
                     type="button"
-                    aria-label={`Open ${path}`}
+                    aria-label={copy.settings.openRepository(path)}
                     title={path}
                     onClick={() => onOpenRecent(path)}
                   >

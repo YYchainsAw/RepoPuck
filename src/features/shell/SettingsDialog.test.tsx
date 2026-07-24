@@ -2,6 +2,7 @@
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { I18nProvider } from "../../i18n";
 import {
   ShellSettingsProvider,
   useShellSettings,
@@ -37,21 +38,62 @@ function Harness({
 }) {
   const settings = useShellSettings();
   return (
-    <SettingsDialog
-      open={open}
-      settings={settings.settings}
-      shellMode={shellMode}
-      shellModePending={shellModePending}
-      shellModeError={shellModeError}
-      onShellModeChange={onShellModeChange}
-      onThemeChange={settings.setTheme}
-      onPinnedChange={settings.setPinned}
-      onClearRecent={settings.clearRecentRepositories}
-      onOpenRecent={onOpenRecent}
-      onClose={vi.fn()}
-    />
+    <I18nProvider>
+      <SettingsDialog
+        open={open}
+        settings={settings.settings}
+        shellMode={shellMode}
+        shellModePending={shellModePending}
+        shellModeError={shellModeError}
+        onShellModeChange={onShellModeChange}
+        onThemeChange={settings.setTheme}
+        onPinnedChange={settings.setPinned}
+        onClearRecent={settings.clearRecentRepositories}
+        onOpenRecent={onOpenRecent}
+        onClose={vi.fn()}
+      />
+    </I18nProvider>
   );
 }
+
+it("switches and persists the interface language independently from commit language", async () => {
+  const persistence: ShellSettingsPersistence = {
+    save: vi.fn().mockResolvedValue(undefined),
+  };
+  render(
+    <ShellSettingsProvider
+      initialSettings={{
+        theme: "light",
+        pinned: false,
+        recentRepositories: [],
+        language: "en",
+      }}
+      persistence={persistence}
+    >
+      <Harness />
+    </ShellSettingsProvider>,
+  );
+
+  expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+  fireEvent.change(screen.getByRole("combobox", { name: /Interface language/ }), {
+    target: { value: "zh-CN" },
+  });
+
+  expect(screen.getByRole("heading", { name: "设置" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "关闭" })).toBeInTheDocument();
+  expect(screen.getByRole("radiogroup", { name: "启动模式" })).toBeInTheDocument();
+  expect(screen.getByRole("combobox", { name: "提交信息语言" })).toHaveValue(
+    "zh-CN",
+  );
+  await waitFor(() =>
+    expect(persistence.save).toHaveBeenCalledWith({
+      theme: "light",
+      pinned: false,
+      recentRepositories: [],
+      language: "zh-CN",
+    }),
+  );
+});
 
 it("offers three accessible launch modes and applies a selection immediately", () => {
   const onShellModeChange = vi.fn();
@@ -321,6 +363,45 @@ it("stores, replaces, and removes the API key without ever revealing it", async 
   expect(screen.getByText("No API key saved yet.")).toBeInTheDocument();
 });
 
+it("localizes concrete Windows Credential Manager failures", async () => {
+  Object.defineProperty(window, "__TAURI_INTERNALS__", {
+    configurable: true,
+    value: {},
+  });
+  invokeMock.mockImplementation(async (command: string) => {
+    if (command === "get_ai_key_status") return { configured: false };
+    return {
+      success: false,
+      message: "Windows Credential Manager could not save the AI API key",
+    };
+  });
+
+  render(
+    <ShellSettingsProvider
+      initialSettings={{
+        theme: "light",
+        pinned: false,
+        recentRepositories: [],
+        language: "zh-CN",
+      }}
+    >
+      <Harness />
+    </ShellSettingsProvider>,
+  );
+
+  await waitFor(() => expect(screen.getByText("尚未保存 API 密钥。")).toBeInTheDocument());
+  fireEvent.change(screen.getByLabelText("AI API 密钥"), {
+    target: { value: "sk-valid-looking" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "保存密钥" }));
+
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Windows 凭据管理器无法保存 AI API 密钥。",
+    ),
+  );
+});
+
 it("clears an unsubmitted API key as soon as the dialog closes", async () => {
   Object.defineProperty(window, "__TAURI_INTERNALS__", {
     configurable: true,
@@ -402,7 +483,7 @@ it("discloses exactly what is sent when generating a message", () => {
   );
 
   expect(
-    screen.getByText(/only when you click Generate, staged text differences/i),
+    screen.getByText(/only when you click AI, staged text differences/i),
   ).toBeInTheDocument();
   expect(
     screen.getByText(/Known sensitive paths and binary contents are excluded/i),

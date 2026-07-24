@@ -364,6 +364,21 @@
   grid-template-columns: 20px minmax(0, 1fr);
 }
 
+.ai-neutral-badge {
+  align-items: center;
+  background: var(--panel-subtle);
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  color: var(--panel-text);
+  display: inline-flex;
+  font-size: 9px;
+  font-weight: 700;
+  height: 20px;
+  justify-content: center;
+  letter-spacing: -0.02em;
+  width: 20px;
+}
+
 .ai-commit-heading > span,
 .api-key-heading > span {
   display: grid;

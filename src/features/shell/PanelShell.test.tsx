@@ -99,6 +99,7 @@ beforeEach(() => {
     colorMode: "light",
     setTheme: vi.fn(),
     setPinned: vi.fn(),
+    setLanguage: vi.fn(),
     setAiCommitPreferences: vi.fn(),
     rememberRepository: vi.fn(),
     clearRecentRepositories: vi.fn(),
@@ -210,6 +211,27 @@ describe("PanelShell", () => {
       screen.getByRole("button", { name: /Game project checks/ }),
     ).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Missing .meta file")).toBeInTheDocument();
+  });
+
+  it("keeps game-only context and file groups hidden in a regular Git repository", () => {
+    workspace.current = createWorkspace({
+      snapshot: {
+        ...snapshot,
+        changes: [
+          {
+            ...snapshot.changes[0],
+            path: "content/example.scene",
+            gameCategory: "scene",
+          },
+        ],
+      },
+    });
+
+    render(<PanelShell />);
+
+    expect(screen.getByRole("heading", { name: "Changes 1" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Scenes 1" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Unity|Unreal|Game project checks/)).not.toBeInTheDocument();
   });
 
   it("reopens danger checks when switching nested projects in one repository", () => {

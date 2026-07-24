@@ -4,6 +4,8 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import puckIconUrl from "../../../src-tauri/icons/128x128.png";
+import { useI18n } from "../../i18n";
+import { getShellCopy } from "../../i18n/shell";
 import { createNativeShellClient, type NativeShellClient } from "./nativeClient";
 import "./native-shell.css";
 
@@ -27,12 +29,17 @@ export function Puck({
   expanded = false,
   client: injectedClient,
 }: PuckProps) {
+  const { language } = useI18n();
+  const copy = getShellCopy(language);
   const clientRef = useRef(injectedClient ?? createNativeShellClient());
   const gesture = useRef<PointerOrigin | null>(null);
   const toggleRequest = useRef<Promise<void> | null>(null);
   const togglePending = useRef(false);
   const count = Math.max(0, Math.floor(changeCount));
-  const countLabel = count === 0 ? "no changed files" : `${count} changed ${count === 1 ? "file" : "files"}`;
+  const countLabel =
+    count === 0
+      ? copy.launcher.noChangedFiles
+      : copy.launcher.changedFiles(count);
 
   const togglePanel = () => {
     if (toggleRequest.current) {
@@ -126,13 +133,13 @@ export function Puck({
   };
 
   return (
-    <main className="puck-surface" aria-label="RepoPuck launcher">
+    <main className="puck-surface" aria-label={copy.launcher.surface}>
       <button
         className="puck-button"
         type="button"
-        aria-label={`Toggle Git panel, ${countLabel}`}
+        aria-label={copy.launcher.togglePanel(countLabel)}
         aria-expanded={expanded}
-        title="Show or hide RepoPuck"
+        title={copy.launcher.showOrHide}
         onPointerDown={startPointer}
         onPointerMove={movePointer}
         onPointerUp={endPointer}

@@ -1,6 +1,8 @@
 import { ChevronDownIcon, GitBranchIcon } from "@primer/octicons-react";
 import { useRef } from "react";
 import puckIconUrl from "../../../src-tauri/icons/128x128.png";
+import { useI18n } from "../../i18n";
+import { getShellCopy } from "../../i18n/shell";
 import { createNativeShellClient, type NativeShellClient } from "./nativeClient";
 import "./native-shell.css";
 
@@ -15,14 +17,16 @@ export function TopIsland({
   expanded,
   client: injectedClient,
 }: TopIslandProps) {
+  const { language } = useI18n();
+  const copy = getShellCopy(language);
   const clientRef = useRef(injectedClient ?? createNativeShellClient());
   const toggleRequest = useRef<Promise<void> | null>(null);
   const togglePending = useRef(false);
   const count = Math.max(0, Math.floor(changeCount));
   const countLabel =
     count === 0
-      ? "No changed files"
-      : `${count} changed ${count === 1 ? "file" : "files"}`;
+      ? copy.launcher.noChangedFiles
+      : copy.launcher.changedFiles(count);
 
   const togglePanel = () => {
     if (toggleRequest.current) {
@@ -46,16 +50,20 @@ export function TopIsland({
   return (
     <main
       className="top-island-surface"
-      aria-label="RepoPuck top island"
+      aria-label={copy.launcher.topIsland}
       data-expanded={expanded}
       data-placement="top-edge"
     >
       <button
         className="top-island-button"
         type="button"
-        aria-label={`${expanded ? "Hide" : "Show"} RepoPuck Git panel, ${countLabel.toLowerCase()}`}
+        aria-label={
+          expanded
+            ? copy.launcher.hidePanel(countLabel)
+            : copy.launcher.showPanel(countLabel)
+        }
         aria-expanded={expanded}
-        title={expanded ? "Hide RepoPuck" : "Open RepoPuck"}
+        title={expanded ? copy.launcher.hide : copy.launcher.open}
         onClick={togglePanel}
         onContextMenu={(event) => {
           event.preventDefault();

@@ -1,6 +1,8 @@
 import { AlertIcon, CheckCircleIcon, CopyIcon, XIcon } from "@primer/octicons-react";
 import { IconButton } from "@primer/react";
 import { useState } from "react";
+import { useI18n } from "../../i18n";
+import { getShellCopy } from "../../i18n/shell";
 
 interface NoticeProps {
   kind: "success" | "error";
@@ -9,6 +11,8 @@ interface NoticeProps {
 }
 
 export function Notice({ kind, children, onDismiss }: NoticeProps) {
+  const { language } = useI18n();
+  const copy = getShellCopy(language);
   const Icon = kind === "error" ? AlertIcon : CheckCircleIcon;
   const [copyFeedback, setCopyFeedback] = useState<{
     message: string;
@@ -38,12 +42,16 @@ export function Notice({ kind, children, onDismiss }: NoticeProps) {
       {kind === "error" && (
         <>
           <span className="panel-notice__copy-status" aria-live="polite">
-            {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : ""}
+            {copyState === "copied"
+              ? copy.notice.copied
+              : copyState === "failed"
+                ? copy.notice.copyFailed
+                : ""}
           </span>
           <IconButton
             icon={CopyIcon}
             unsafeDisableTooltip
-            aria-label="Copy error details"
+            aria-label={copy.notice.copyErrorDetails}
             variant="invisible"
             onClick={() => void copyDetails()}
           />
@@ -53,7 +61,7 @@ export function Notice({ kind, children, onDismiss }: NoticeProps) {
         <IconButton
           icon={XIcon}
           unsafeDisableTooltip
-          aria-label="Dismiss notification"
+          aria-label={copy.notice.dismiss}
           variant="invisible"
           onClick={onDismiss}
         />
