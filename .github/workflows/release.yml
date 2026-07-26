@@ -121,22 +121,45 @@ jobs:
         working-directory: src-tauri
         run: cargo test --locked
 
+      - name: Clean previous MSI bundle output
+        shell: pwsh
+        run: |
+          $workspaceRoot = [System.IO.Path]::GetFullPath(
+            $env:GITHUB_WORKSPACE
+          ).TrimEnd('\') + '\'
+          $bundleDirectory = [System.IO.Path]::GetFullPath(
+            (Join-Path $workspaceRoot "src-tauri/target/release/bundle/msi")
+          )
+          if (
+            -not $bundleDirectory.StartsWith(
+              $workspaceRoot,
+              [System.StringComparison]::OrdinalIgnoreCase
+            ) -or
+            (Split-Path -Leaf $bundleDirectory) -ne "msi"
+          ) {
+            throw "Refusing to clean unexpected bundle path: $bundleDirectory"
+          }
+          if (Test-Path -LiteralPath $bundleDirectory) {
+            Remove-Item -LiteralPath $bundleDirectory -Recurse -Force
+          }
+
       - name: Build release MSI
         run: pnpm tauri build --bundles msi --ci
 
-      - name: Verify MSI and generate checksums
-        id: release_assets
+      - name: Locate tagged-version MSI
+        id: msi_bundle
         shell: pwsh
         run: |
           $releaseVersion = $env:GITHUB_REF_NAME -replace '^v', ''
+          $expectedPattern = "RepoPuck_$($releaseVersion)_*.msi"
           $msiFiles = @(
             Get-ChildItem `
               -LiteralPath "src-tauri/target/release/bundle/msi" `
-              -Filter "RepoPuck_$($releaseVersion)_*.msi" `
+              -Filter $expectedPattern `
               -File
           )
           if ($msiFiles.Count -ne 1) {
-            throw "Expected exactly one v$releaseVersion MSI bundle, found $($msiFiles.Count)."
+            throw "Expected exactly one '$expectedPattern' bundle, found $($msiFiles.Count)."
           }
 
           $builtMsi = $msiFiles[0]
@@ -144,6 +167,56 @@ jobs:
             throw "MSI bundle is empty: $($builtMsi.FullName)"
           }
 
+          "msi_path=$($builtMsi.FullName)" >> $env:GITHUB_OUTPUT
+          $builtMsi | Select-Object FullName, Length
+
+      # Optional Authenticode signing hook:
+      # 1. Store the base64 PFX and password as WINDOWS_CERTIFICATE_BASE64 and
+      #    WINDOWS_CERTIFICATE_PASSWORD repository secrets.
+      # 2. Restore the PFX under RUNNER_TEMP and import it only for this job.
+      # 3. Sign steps.msi_bundle.outputs.msi_path with signtool.exe here.
+      # 4. Remove the temporary certificate before checksums are generated.
+      # Until that is implemented, releases remain deliberately unsigned and
+      # missing secrets never prevent CI or release builds.
+      - name: Report optional code-signing status
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) {
+            Write-Host "No Authenticode certificate configured; continuing with an unsigned MSI."
+          }
+          else {
+            Write-Warning `
+              "A signing certificate secret is present, but Authenticode signing is not enabled yet."
+          }
+
+      - name: Smoke test silent MSI install and uninstall
+        shell: pwsh
+        env:
+          MSI_PATH: ${{ steps.msi_bundle.outputs.msi_path }}
+        run: |
+          & ".github/scripts/Test-MsiInstall.ps1" `
+            -MsiPath $env:MSI_PATH `
+            -LogDirectory (Join-Path $env:RUNNER_TEMP "repopuck-msi-smoke")
+
+      - name: Upload MSI smoke-test logs on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: repopuck-release-msi-smoke-logs-${{ github.sha }}
+          path: ${{ runner.temp }}/repopuck-msi-smoke/*.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Generate release asset and checksums
+        id: release_assets
+        shell: pwsh
+        env:
+          BUILT_MSI_PATH: ${{ steps.msi_bundle.outputs.msi_path }}
+        run: |
+          $releaseVersion = $env:GITHUB_REF_NAME -replace '^v', ''
+          $builtMsi = Get-Item -LiteralPath $env:BUILT_MSI_PATH
           $releaseMsiName = "RepoPuck_$($releaseVersion)_windows-x64.msi"
           $releaseMsiPath = Join-Path $env:GITHUB_WORKSPACE $releaseMsiName
           Copy-Item -LiteralPath $builtMsi.FullName -Destination $releaseMsiPath

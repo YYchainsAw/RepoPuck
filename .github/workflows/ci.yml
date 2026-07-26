@@ -128,25 +128,78 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
+      - name: Clean previous MSI bundle output
+        shell: pwsh
+        run: |
+          $workspaceRoot = [System.IO.Path]::GetFullPath(
+            $env:GITHUB_WORKSPACE
+          ).TrimEnd('\') + '\'
+          $bundleDirectory = [System.IO.Path]::GetFullPath(
+            (Join-Path $workspaceRoot "src-tauri/target/release/bundle/msi")
+          )
+          if (
+            -not $bundleDirectory.StartsWith(
+              $workspaceRoot,
+              [System.StringComparison]::OrdinalIgnoreCase
+            ) -or
+            (Split-Path -Leaf $bundleDirectory) -ne "msi"
+          ) {
+            throw "Refusing to clean unexpected bundle path: $bundleDirectory"
+          }
+          if (Test-Path -LiteralPath $bundleDirectory) {
+            Remove-Item -LiteralPath $bundleDirectory -Recurse -Force
+          }
+
       - name: Build release MSI
         run: pnpm tauri build --bundles msi --ci
 
       - name: Verify MSI bundle
+        id: msi_bundle
         shell: pwsh
         run: |
-          $msiFiles = @(Get-ChildItem -Path "src-tauri/target/release/bundle/msi" -Filter "*.msi" -File)
+          $version = (
+            Get-Content -LiteralPath "src-tauri/tauri.conf.json" -Raw |
+              ConvertFrom-Json
+          ).version
+          $expectedPattern = "RepoPuck_$($version)_*.msi"
+          $msiFiles = @(
+            Get-ChildItem `
+              -LiteralPath "src-tauri/target/release/bundle/msi" `
+              -Filter $expectedPattern `
+              -File
+          )
           if ($msiFiles.Count -ne 1) {
-            throw "Expected exactly one MSI bundle, found $($msiFiles.Count)."
+            throw "Expected exactly one '$expectedPattern' bundle, found $($msiFiles.Count)."
           }
           if ($msiFiles[0].Length -le 0) {
             throw "MSI bundle is empty: $($msiFiles[0].FullName)"
           }
-          $msiFiles | Select-Object FullName, Length
+          $msiPath = $msiFiles[0].FullName
+          "msi_path=$msiPath" >> $env:GITHUB_OUTPUT
+          Get-Item -LiteralPath $msiPath | Select-Object FullName, Length
+
+      - name: Smoke test silent MSI install and uninstall
+        shell: pwsh
+        env:
+          MSI_PATH: ${{ steps.msi_bundle.outputs.msi_path }}
+        run: |
+          & ".github/scripts/Test-MsiInstall.ps1" `
+            -MsiPath $env:MSI_PATH `
+            -LogDirectory (Join-Path $env:RUNNER_TEMP "repopuck-msi-smoke")
+
+      - name: Upload MSI smoke-test logs on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: repopuck-msi-smoke-logs-${{ github.sha }}
+          path: ${{ runner.temp }}/repopuck-msi-smoke/*.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Upload MSI artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: repopuck-msi-${{ github.sha }}
-          path: src-tauri/target/release/bundle/msi/*.msi
+          path: ${{ steps.msi_bundle.outputs.msi_path }}
           if-no-files-found: error
           retention-days: 7
