@@ -2,7 +2,7 @@
 
 RepoPuck is a Windows desktop application built with Tauri 2, Rust, React, and TypeScript. Its main architectural rule is simple: React describes user intent and renders the current state, while Rust owns repository validation, external project activation, Git processes, game-project analysis, shell-mode state, native windows, monitor geometry, and persistence of native placement.
 
-> Version boundary: `v0.1.2` is the stable floating-puck release. This document describes the architecture currently implemented on `develop`, including the `v0.2.0` island, drawer, and Unity/Unreal workflow plus the optional AI commit-message work developed afterward. The shell-mode baseline has local evidence in [`docs/design-qa.md`](design-qa.md) and passed [CI #11](https://github.com/YYchainsAw/RepoPuck/actions/runs/29917798861); newer additions remain preview work until their own packaged-app validation is complete.
+> Version boundary: `v0.2.1` is the current published baseline. This document describes the `v0.2.2` architecture implemented on `develop`, including the low-overhead refresh path, cancellable Fetch, provider-isolated AI credentials, and Windows MSI lifecycle smoke test. The shell-mode baseline has local evidence in [`docs/design-qa.md`](design-qa.md) and passed [CI #11](https://github.com/YYchainsAw/RepoPuck/actions/runs/29917798861); newer additions remain preview work until their own packaged-app validation is complete.
 
 The application keeps one Git panel and one launcher WebView. The three shell modes change how those two native surfaces are configured; they do not create three separate Git interfaces:
 
@@ -169,7 +169,7 @@ The frontend lives under `src/` and owns presentation plus short-lived interacti
 | `src/features/shell/useNativeShellState.tsx` | Validate the native wire format, query the initial snapshot, subscribe to shell-state and transition events, expose `setMode`, and acknowledge completed transitions. |
 | `src/features/shell/PuckWindow.tsx`, `Puck.tsx`, and `TopIsland.tsx` | Reuse the launcher WebView for puck and island modes, toggle the panel, and run only the lightweight change-count lifecycle. |
 | `src/features/shell/PanelWindow.tsx` | Observe `PanelPhase`, host mode-specific open/close motion, keep Git polling tied to visibility, expose resize handles, and lazy-load the panel UI. |
-| `src/features/shell/PanelShell.tsx` and `DrawerDragHandle.tsx` | Provide one shared Git interface for all three modes, insert game-project context above the change list when detected, and expose the drawer-only native drag affordance without duplicating the workspace. |
+| `src/features/shell/PanelShell.tsx` and `DrawerDragHandle.tsx` | Provide one shared Git interface for all three modes, insert game-project context above the change list when detected, show elapsed operation time, expose Fetch cancellation, and provide the drawer-only native drag affordance without duplicating the workspace. |
 | `src/features/shell/SettingsDialog.tsx` | Select the shell mode and interface language; edit theme, pin, recent repositories, and non-secret AI preferences; save or remove the AI key through dedicated native commands without reading it back. |
 | `src/i18n/` | Resolve `system`, `zh-CN`, or `en`; provide typed Git, game, and shell copy; localize known native diagnostics; and validate the cross-WebView `interface_language_changed` contract. |
 | `src/features/game/` | Render the Unity/Unreal project banner and accessible, collapsible safety summary only when Rust positively identifies the selected folder as a game project. Generic repositories do not mount this UI. |
@@ -178,7 +178,7 @@ The frontend lives under `src/` and owns presentation plus short-lived interacti
 | `src/features/git/client.ts` | Define the `GitClient` contract and runtime client selection. |
 | `src/features/git/demoClient.ts` | Provide in-memory behavior for browser development and deterministic tests. |
 | `src/features/git/tauriClient.ts` | Translate typed `GitClient` calls into Tauri commands. |
-| `src/features/git/GitProvider.tsx` and `useGitWorkspace.ts` | Manage snapshot refresh, polling, mutation serialization, editable drafts, stale AI-response rejection, and notices or errors. |
+| `src/features/git/GitProvider.tsx` and `useGitWorkspace.ts` | Manage token-aware snapshot refresh, polling, mutation serialization, editable drafts, operation cancellation, stale repository/AI-response rejection, and notices or errors. |
 
 Each WebView has its own `NativeShellStateProvider` and `ShellSettingsProvider`. Native shell state subscribes before accepting a one-time query, tracks event revisions to prevent a slower query from overwriting a newer event, and normalizes every payload at the boundary. Interface-language changes are broadcast as a validated preference plus resolved language, so the panel, puck or island, native tray, and dialogs update without a restart. Mode changes are read back from Rust rather than applied optimistically in React.
 
@@ -191,12 +191,12 @@ The native code lives under `src-tauri/src/`.
 | Area | Responsibility |
 | --- | --- |
 | `ai.rs` | Validate AI settings, access the per-user Windows credential, call the configured Chat Completions endpoint, sanitize its response, and assemble the final Conventional Commit locally. |
-| `commands.rs` | Tauri command boundary, shared repository state, blocking-task dispatch, and serializable responses. |
+| `commands.rs` | Tauri command boundary, short-lived repository-selection state, a separate mutation guard, active Fetch cancellation, blocking-task dispatch, panel-window validation, and serializable responses. |
 | `external_launch.rs` | Pure parsing and validation for CLI and `repopuck://open` repository requests. |
 | `project_activation.rs` | Startup precedence, caller-relative CLI resolution, localized protocol-path confirmation, selection-intent ordering, recent-list persistence, and refresh signaling. |
 | `game_projects.rs` | Candidate-root Unity/Unreal detection, engine metadata, semantic path classification, Unity `.meta` integrity checks, and generated/large/LFS risk modeling. |
 | `git/process.rs` | Windows no-console suspended start, Job Object ownership, process-tree termination, and reader cancellation. |
-| `git/runner.rs` | Bounded, non-interactive orchestration of the system `git` binary, stdin batches, and output readers, including literal path batches after `--`. |
+| `git/runner.rs` | Bounded, non-interactive orchestration of the system `git` binary, stdin batches, output readers, cancellation checks, and literal path batches after `--`. |
 | `git/parser.rs` | Pure parsing for porcelain status and numstat data. |
 | `git/service.rs` | Repository validation, nested game selection, staging, committing, pushing, branches, safe secondary operations, index-blob analysis, staged/working-tree LFS resolution, and bounded staged-diff collection for AI. |
 | `git/model.rs` | Rust models matching the TypeScript snapshot, including optional `selectionPath`, game profiles, per-change categories, and safety issues. |
@@ -226,7 +226,7 @@ Top surfaces remember `topSurfaceMonitorName`. Monitor selection falls back from
 4. Porcelain and numstat parsers create branches, ahead/behind state, and change entries.
 5. A bounded inspection walks from the explicitly selected directory toward the enclosing Git root and decides whether one of those directories is a Unity or Unreal project. When detected, in-project changes receive semantic categories and the service derives game safety issues from changed paths, the Git index, on-disk metadata for unstaged files, and effective Git attributes.
 6. The response crosses the Tauri boundary as camel-cased JSON and replaces the frontend snapshot only if it still belongs to the active repository/client generation and differs structurally from the current snapshot, including game metadata and risks.
-7. The visible panel performs a single-flight full refresh immediately and every 10 seconds. Hiding it clears that timer; showing it starts with a fresh snapshot. Mutations are serialized so polling cannot race a conflicting operation.
+7. The visible panel performs a single-flight full refresh immediately. Its 10-second poll reads a lightweight refresh token derived from porcelain-v2 status plus unstaged numstat, so continued edits that change displayed line counts are detected without rebuilding branches, remotes, and project analysis. It requests a full snapshot only when that token changes. A forced full reconciliation runs every 60 seconds, and opening the panel, manual refresh, and operation completion also request a full snapshot. Hiding the panel clears the timer.
 8. The puck and island do not load the full workspace provider or perform game analysis. They request a lightweight changed-file count immediately and every 30 seconds with one porcelain-status command and a single-flight guard. Top-drawer mode hides the launcher view, so no launcher polling is needed while it is inactive.
 
 ## Game-project detection, classification, and safety
@@ -295,11 +295,15 @@ sequenceDiagram
 
 The submitted message is cleared only after a successful commit or amend, and only if the user has not typed a newer draft while the operation was pending. A failed commit or amend preserves its draft. A commit that succeeds followed by a failed push retains explicit feedback so the user can recover deliberately.
 
+Managed Rust state uses a short-lived repository-selection lock and a separate mutation lock. Read commands clone the selected `GitService` and release the selection lock before running Git; selecting another repository and reading its state therefore remain responsive while a long mutation is in progress. Mutations are still serialized with each other and remain bound to the service instance on which they started. The frontend records the active repository/client generation and discards a snapshot or operation result that returns for an older selection, then refreshes the current repository after the active operation completes.
+
 ## Git execution and safety boundary
 
 RepoPuck launches `git` directly with `std::process::Command` and a vector of arguments. It never constructs a shell command string. Every blocking repository operation is dispatched through Tauri's blocking task pool, keeping async commands and native window events responsive while Git runs.
 
-On Windows, Git starts suspended and without a console window, is assigned to a per-operation Job Object with kill-on-close, and is then resumed. Git stdin is closed, terminal prompting is disabled, and stdout and stderr are drained concurrently with a retained-output limit. Read-only/status commands use a 30-second limit, local mutations such as `add` and `commit` use five minutes for hooks and Git LFS filters, and `push`, `fetch`, and `pull` use 15 minutes for large remote transfers. A timeout terminates the complete Job Object process tree and hands canceled readers to a reaper, so credential helpers or transports cannot keep the serialized repository operation locked.
+On Windows, Git starts suspended and without a console window, is assigned to a per-operation Job Object with kill-on-close, and is then resumed. Git stdin is closed, terminal prompting is disabled, and stdout and stderr are drained concurrently with a retained-output limit. Read-only/status commands use a 30-second limit, local mutations such as `add` and `commit` use five minutes for hooks and Git LFS filters, and `push`, `fetch`, and `pull` use 15 minutes for large remote transfers. A timeout terminates the complete Job Object process tree and hands canceled readers to a reaper, so credential helpers or transports cannot keep an operation alive.
+
+Fetch is the intentionally user-cancellable Git operation. The command registers a cancellation token, the panel exposes a Cancel action while showing elapsed time, and the runner closes the operation's Job Object when cancellation is observed so transports and credential-helper descendants end with the parent. Cancellation is reported as a neutral outcome and the workspace refreshes afterward. Commit, amend, push, pull, branch switching, staging, and other write operations are not exposed as casually cancellable because stopping them midway can leave an ambiguous local or remote result; their bounded timeouts and process-tree cleanup still apply.
 
 Commands that accept repository paths place `--` before paths and use literal pathspecs. The service rejects staging paths that are absent from the current porcelain snapshot. Directly selected directories and externally activated paths both pass through Git validation and canonicalization before becoming repository state. Push, fetch, and pull receive an explicit validated tracking remote and ref, or `origin` for a first push, rather than inheriting ambient push configuration. Errors are converted into conservative diagnostics; credential-bearing URLs, secrets, environment values, and unrelated process data must not cross into UI notices.
 
@@ -313,8 +317,8 @@ AI generation is an optional draft action, not a commit action. The user stages 
 
 The native path applies these boundaries:
 
-1. The API key is written as a generic, current-user Windows credential under the RepoPuck target. The UI can query only whether a key exists; no command returns its value.
-2. `GitService` reads only the Git index. It rejects an empty staged set, excludes known sensitive paths (including both sides of a rename), omits binary bodies, redacts common credential-bearing lines, and caps selection at 200 files, 12 KiB of literal pathspecs, and 64 KiB of retained context.
+1. The API key is written as a generic, current-user Windows credential under a target derived from the normalized provider origin: scheme, host, and effective port. Paths on the same origin share a key, while another scheme, host, or port cannot reuse it silently. The UI can query only whether a key exists for the selected origin; no command returns its value. A pre-v0.2.2 legacy key is copied to an origin-specific target only through an explicit migration action.
+2. `GitService` reads only the Git index. It rejects an empty staged set, excludes known sensitive paths (including both sides of a rename), omits binary bodies, redacts common credential-bearing lines, and caps selection at 200 files, 12 KiB of literal pathspecs, and 64 KiB of retained context. Before generation, Settings can request a local summary containing the included-file count, approximate retained bytes, omitted-binary count, excluded paths, and truncation state; the raw diff does not cross into the frontend.
 3. Staged paths are passed to Git as literal pathspec arguments after `--`. An empty or oversized selection fails closed instead of falling back to an unscoped diff.
 4. Repository locking ends after context collection. The network request does not hold the Git mutex, and the selection generation is checked before and after the request so a response from an older repository is rejected.
 5. The configured base URL must use HTTPS, except for loopback HTTP used by local services. Credentials in URLs are rejected, redirects are disabled, the request has a 30-second timeout, and provider response bodies never appear in errors.
@@ -330,9 +334,10 @@ This model supports GitHub, GitLab, self-hosted servers, and other Git remotes w
 
 ## Performance boundaries
 
-- The panel bundle and `PanelShell` are lazy-loaded. Full repository polling runs only while the panel is logically visible.
-- Workspace refresh and launcher count refresh are independently single-flight. Git mutations are serialized.
+- The panel bundle and `PanelShell` are lazy-loaded. Repository polling runs only while the panel is logically visible; its 10-second path checks a compact refresh token, and full snapshots are limited to detected changes and a 60-second reconciliation fallback.
+- Workspace token checks, full refreshes, and launcher count refreshes are independently single-flight. Git mutations are serialized by their own lock, while selection and read paths remain responsive.
 - The puck and island use a lightweight status count rather than constructing the full repository snapshot.
+- Large change lists use CSS `content-visibility` with an intrinsic row size so off-screen rows do not all participate in layout and paint.
 - Game-project detection inspects only direct entries while walking the explicit selection toward its Git root; it does not recursively walk Unity `Assets`, Unreal `Content`, or unrelated monorepo children. File-risk work is limited to paths already present in the current Git change set, while index sizes, pointer blobs, and LFS attribute queries use bounded batch commands.
 - Top-drawer discovery runs in Rust and does not keep a hidden launcher WebView active. It uses short sleeps and a monitor cache instead of a continuous busy loop.
 - Native move calls are skipped when coordinates have not changed, which limits Windows messages during resize and DPI reflow.
@@ -346,6 +351,7 @@ Both production WebViews use the restrictive content-security policy defined in 
 - Both windows can listen for shell events and read the non-secret settings store.
 - Only the panel can open the repository picker, read native visibility, write settings, initiate native resize dragging, and start the drawer's native horizontal drag.
 - Only the launcher can initiate native window dragging.
+- Privileged custom Git and AI commands independently verify that the invoking WebView window label is `panel` at the Rust boundary. The launcher's custom Git access is limited to the lightweight changed-file count.
 - RepoPuck does not register or expose a filesystem plugin to frontend code.
 
 The `GetCursorPos` drawer watcher reads only the current screen coordinate. It does not install a global input hook, record clicks or keystrokes, inspect other applications, or send pointer data to the frontend. The worker exits during application shutdown and dispatches window mutations to the main thread.
@@ -383,13 +389,13 @@ An unpinned puck-mode panel remains open on focus loss so native edge resizing i
 
 ## Testing layers
 
-- **Pure Rust tests** cover Git output parsing, argument construction, URL and AI-request validation, response normalization, secret-line redaction, CLI/deep-link request parsing and path restrictions, game root detection, semantic classification, Unity `.meta` logic, canonical LFS-pointer parsing, large/LFS thresholds, shell-state transitions, stale completion rejection, drawer dwell and leave timing, and placement geometry.
-- **Temporary-repository Rust tests** exercise validation, nested `selectionPath` behavior, staging, unstaging, commits, branch state, upstream-push decisions, Unity snapshot enrichment, Unreal detection, staged AI-context bounds and sensitive rename exclusion, staged index sizes and pointers, and effective staged/working-tree Git LFS attributes without touching a real user project.
-- **Vitest and Testing Library** cover client contracts, workspace concurrency and lifecycle, AI-generation cancellation and draft replacement, secure-key UI states, settings persistence, game grouping, game banner and safety-panel accessibility, shell-state normalization, provider event ordering, mode selection, panel transitions, launcher behavior, and accessibility names.
+- **Pure Rust tests** cover Git output parsing, argument construction, cancellation and Job Object cleanup, URL and AI-request validation, provider-origin credential isolation, response normalization, secret-line redaction, panel-window command restrictions, CLI/deep-link request parsing and path restrictions, game root detection, semantic classification, Unity `.meta` logic, canonical LFS-pointer parsing, large/LFS thresholds, shell-state transitions, stale completion rejection, drawer dwell and leave timing, and placement geometry.
+- **Temporary-repository Rust tests** exercise validation, nested `selectionPath` behavior, refresh-token changes, read/selection responsiveness during serialized mutations, staging, unstaging, commits, branch state, upstream-push decisions, Unity snapshot enrichment, Unreal detection, staged AI-context bounds and sensitive rename exclusion, staged index sizes and pointers, and effective staged/working-tree Git LFS attributes without touching a real user project.
+- **Vitest and Testing Library** cover client contracts, token-aware refresh and workspace concurrency, cancellable Fetch, partial Commit & Push results, AI-generation cancellation and draft replacement, provider-specific secure-key UI states, AI context summaries, settings persistence, game grouping, game banner and safety-panel accessibility, shell-state normalization, provider event ordering, mode selection, panel transitions, launcher behavior, and accessibility names.
 - **Manual browser-demo smoke checks** exercise the in-memory Git client without touching a repository.
 - **Native smoke tests and visual QA** cover launcher and panel windows, tray behavior, all three modes, rapid transition reversal, placement, persistence, and light/dark states on the available Windows display hardware. Mixed-DPI and negative-coordinate calculations remain deterministic Rust coverage until matching physical hardware is recorded.
 
-Windows CI runs deterministic frontend and Rust gates, then performs a locked release MSI build, verifies that exactly one non-empty installer was produced, and uploads it as a workflow artifact. Native interaction, deep-link registration, second-instance activation, and real Unity/Unreal editor launches remain explicit release gates because they require the produced Windows application and, for the bridges, installed editor environments.
+Windows CI runs deterministic frontend and Rust gates, then performs a locked release MSI build and verifies that exactly one non-empty installer matches the configured version. A shared PowerShell smoke test silently installs that MSI, verifies the installed application and registration, silently uninstalls it, verifies removal, and uploads MSI logs when the lifecycle fails. Only a package that passes this lifecycle is uploaded or published. Interactive native behavior, second-instance activation, and real Unity/Unreal editor launches remain explicit release gates because they require desktop interaction and, for the bridges, installed editor environments.
 
 ## Adding a Git operation
 

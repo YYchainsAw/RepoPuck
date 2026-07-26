@@ -43,6 +43,7 @@ RepoPuck keeps everyday Git actions in a small panel that is always close by. Se
 - 🤖 **AI commit-message drafts** — use your own OpenAI-compatible API to turn staged changes into Chinese or English Conventional Commits.
 - 🧩 **Three desktop surfaces** — use a floating puck, an attached top island, or an auto-revealing top drawer.
 - 🪶 **Lightweight and focused** — common actions stay visible while secondary actions live in the More menu.
+- ⚡ **Low-overhead refreshes** — when the repository is unchanged, RepoPuck checks a lightweight state fingerprint instead of rebuilding the full snapshot.
 - 🌗 **A familiar GitHub-style interface** — powered by GitHub Primer with light, dark, and system themes.
 - 🌐 **简体中文 and English** — follow the system language by default or switch manually in Settings.
 - 🔐 **No GitHub account lock-in** — reuse system Git, Git Credential Manager, or SSH.
@@ -76,7 +77,7 @@ The panel is resizable and remembers a separate size for each mode. The drawer u
 - ✅ Commit locally without pushing.
 - 🚀 Use the separate **Commit & Push** action or push later.
 - ✏️ Amend the most recent local commit after confirmation, without an automatic force-push.
-- 🔄 Fetch, pull, push, stash, and refresh.
+- 🔄 Fetch, pull, push, stash, and refresh; long-running Fetch operations show elapsed time and can be cancelled safely.
 - 🗂️ Open the repository in Explorer or a terminal.
 
 Keyboard shortcuts:
@@ -99,7 +100,7 @@ AI assistance is optional and never replaces the manual commit flow:
 RepoPuck assembles the Conventional Commit prefix locally, so results consistently follow forms such as `feat: subject` or `feat(ui): subject`. You can edit every generated draft before committing.
 
 > [!IMPORTANT]
-> The API key is stored only in **Windows Credential Manager** for the current user. It is never written to `settings.json`, browser storage, logs, or the repository. RepoPuck sends a size-bounded **staged text diff** only when you explicitly generate a message; known sensitive paths and binary contents are excluded, and common secret-looking lines are redacted. Automatic filtering cannot identify every secret, so review the staged content and your provider's privacy policy before using any third-party service.
+> API keys are stored separately for each provider origin in **Windows Credential Manager** for the current user. They are never written to `settings.json`, browser storage, logs, or the repository. After switching provider hosts, you must explicitly confirm an existing legacy key or save a key for that provider; RepoPuck never silently sends an old key to a new origin. Only when you explicitly generate a message does RepoPuck send a size-bounded **staged text diff** directly to the configured service. Settings previews the included file count, approximate bytes, omitted binaries, excluded sensitive paths, and truncation state. Automatic filtering cannot identify every secret, so review the staged content and your provider's privacy policy before using any third-party service.
 
 ## 🚀 Quick start
 
@@ -245,6 +246,9 @@ pnpm tauri build --bundles msi
 - [x] 🛡️ `.meta`, generated-file, large-file, and Git LFS guidance
 - [x] 🔗 Single-instance CLI, deep links, and optional editor bridge source
 - [x] 🤖 Optional Chinese and English AI Conventional Commit drafts
+- [x] ⚡ State-fingerprint refreshes, non-blocking remote operations, and cancellable Fetch
+- [x] 🔐 Provider-isolated AI credentials and outbound-context summaries
+- [x] 📦 Silent Windows MSI install/uninstall smoke tests
 - [ ] 🎮 Validate the bridges in more real Unity and Unreal editor versions
 - [ ] 🔏 Windows code signing
 - [ ] ⌨️ Configurable global keyboard shortcut
