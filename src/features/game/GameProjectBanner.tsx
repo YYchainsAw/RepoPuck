@@ -1,6 +1,8 @@
 import { AlertIcon, ProjectIcon, ShieldCheckIcon } from "@primer/octicons-react";
 import { CounterLabel } from "@primer/react";
 import { useId } from "react";
+import { useI18n } from "../../i18n";
+import { getGameCopy } from "../../i18n/game";
 import styles from "./game.module.css";
 import type { GameProjectSummary, GameSafetyIssue } from "./types";
 
@@ -20,12 +22,12 @@ export function GameProjectBanner({
   issues,
   className,
 }: GameProjectBannerProps) {
+  const { language } = useI18n();
+  const copy = getGameCopy(language);
   const titleId = useId();
   const engineLabel = engineLabels[profile.engine];
   const classNames = [styles.banner, className].filter(Boolean).join(" ");
-  const issueLabel = `${issues.length} game safety ${
-    issues.length === 1 ? "issue" : "issues"
-  }`;
+  const issueLabel = copy.issueCount(issues.length);
 
   return (
     <section
@@ -45,7 +47,9 @@ export function GameProjectBanner({
           <span className={styles.engineBadge}>{engineLabel}</span>
         </div>
         <span className={styles.projectVersion}>
-          {profile.version ? `${engineLabel} ${profile.version}` : `${engineLabel} project`}
+          {profile.version
+            ? `${engineLabel} ${profile.version}`
+            : copy.project(engineLabel)}
         </span>
       </div>
       {issues.length > 0 ? (
@@ -56,16 +60,16 @@ export function GameProjectBanner({
         >
           <AlertIcon size={16} aria-hidden="true" />
           <CounterLabel aria-hidden="true">{issues.length}</CounterLabel>
-          <span>{issues.length === 1 ? "issue" : "issues"}</span>
+          <span>{copy.issueShort(issues.length)}</span>
         </div>
       ) : (
         <div
           className={styles.issueSummary}
           data-has-issues="false"
-          aria-label="No game safety issues"
+          aria-label={copy.noIssues}
         >
           <ShieldCheckIcon size={16} aria-hidden="true" />
-          <span>Checks clear</span>
+          <span>{copy.checksClear}</span>
         </div>
       )}
     </section>

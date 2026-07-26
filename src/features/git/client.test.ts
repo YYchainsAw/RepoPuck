@@ -34,6 +34,26 @@ describe("createGitClient", () => {
     ).toBe(false);
   });
 
+  it("generates a deterministic conventional message in the browser demo", async () => {
+    const client = createGitClient({ runtime: "browser" });
+    const path = (await client.getSnapshot()).changes[0].path;
+    await client.stage([path]);
+
+    await expect(
+      client.generateCommitMessage({
+        baseUrl: "https://api.openai.com/v1",
+        model: "gpt-4.1-mini",
+        language: "zh-CN",
+        commitType: "feat",
+        scope: "ui",
+      }),
+    ).resolves.toEqual({
+      message: "feat(ui): 更新暂存的项目文件",
+      truncated: false,
+      excludedFiles: [],
+    });
+  });
+
   it("maps Git client methods to their exact Tauri commands and arguments", async () => {
     vi.mocked(invoke).mockResolvedValue({ success: true });
     const client = createGitClient({ runtime: "tauri" });
@@ -43,6 +63,13 @@ describe("createGitClient", () => {
     await client.stage(["src/App.tsx"]);
     await client.unstage(["src/App.tsx"]);
     await client.commit("Commit only");
+    await client.generateCommitMessage({
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-4.1-mini",
+      language: "en",
+      commitType: "feat",
+      scope: "ui",
+    });
     await client.amendLastCommit("Revised commit");
     await client.amendLastCommit();
     await client.push();
@@ -62,6 +89,18 @@ describe("createGitClient", () => {
       ["set_staged", { paths: ["src/App.tsx"], staged: true }],
       ["set_staged", { paths: ["src/App.tsx"], staged: false }],
       ["commit", { message: "Commit only" }],
+      [
+        "generate_commit_message",
+        {
+          request: {
+            baseUrl: "https://api.openai.com/v1",
+            model: "gpt-4.1-mini",
+            language: "en",
+            commitType: "feat",
+            scope: "ui",
+          },
+        },
+      ],
       ["amend_last_commit", { message: "Revised commit" }],
       ["amend_last_commit", { message: undefined }],
       ["push"],

@@ -45,3 +45,19 @@ it("defaults unknown URLs to the panel surface", () => {
   expect(getWindowView("?view=puck")).toBe("puck");
   expect(getWindowView("?view=anything-else")).toBe("panel");
 });
+
+it("installs the localized UI inside the shell settings provider", () => {
+  render(
+    <App
+      view="puck"
+      initialSettings={{
+        theme: "light",
+        pinned: false,
+        recentRepositories: [],
+        language: "zh-CN",
+      }}
+    />,
+  );
+
+  expect(document.documentElement).toHaveAttribute("lang", "zh-CN");
+});

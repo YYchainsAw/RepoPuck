@@ -5,6 +5,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GitProvider } from "./GitProvider";
 import type {
+  GenerateCommitMessageResult,
   GitClient,
   OperationResult,
   RepositorySnapshot,
@@ -33,6 +34,14 @@ const initialSnapshot: RepositorySnapshot = {
   ],
 };
 
+const aiPreferences = {
+  baseUrl: "https://api.openai.com/v1",
+  model: "gpt-4.1-mini",
+  language: "en" as const,
+  commitType: "feat" as const,
+  scope: "ui",
+};
+
 function cloneSnapshot(snapshot: RepositorySnapshot): RepositorySnapshot {
   return structuredClone(snapshot);
 }
@@ -57,6 +66,13 @@ function createTestClient() {
       return { success: true };
     }),
     commit: vi.fn(success),
+    generateCommitMessage: vi.fn(
+      async (): Promise<GenerateCommitMessageResult> => ({
+        message: "feat(ui): generate commit messages",
+        truncated: false,
+        excludedFiles: [],
+      }),
+    ),
     amendLastCommit: vi.fn(success),
     push: vi.fn(success),
     commitAndPush: vi.fn(success),
@@ -102,6 +118,30 @@ describe("useGitWorkspace", () => {
 
     expect(result.current.selectedRepository).toEqual(initialSnapshot.repository);
     expect(client.getSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops stale game metadata unless Unity or Unreal was detected", async () => {
+    const client = createTestClient();
+    client.getSnapshot.mockResolvedValueOnce({
+      ...initialSnapshot,
+      changes: [{ ...initialSnapshot.changes[0], gameCategory: "code" }],
+      gameSafetyIssues: [
+        {
+          kind: "large-file",
+          severity: "warning",
+          path: initialSnapshot.changes[0].path,
+          message: "Stale game warning",
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+    expect(result.current.snapshot?.gameSafetyIssues).toBeUndefined();
+    expect(result.current.snapshot?.changes[0].gameCategory).toBeUndefined();
   });
 
   it("preserves snapshot identities when refreshed data is structurally unchanged", async () => {
@@ -166,6 +206,94 @@ describe("useGitWorkspace", () => {
 
     expect(client.stage).toHaveBeenCalledWith(["src/App.tsx"]);
     expect(result.current.snapshot?.changes[0].staged).toBe(true);
+  });
+
+  it("fills the composer with a generated commit message", async () => {
+    const client = createTestClient();
+    client.generateCommitMessage.mockResolvedValueOnce({
+      message: "feat(ui): add AI commit messages",
+      truncated: true,
+      excludedFiles: [".env"],
+    });
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    let generated!: boolean;
+    await act(async () => {
+      generated = await result.current.generateCommitMessage(aiPreferences);
+    });
+
+    expect(generated).toBe(true);
+    expect(client.generateCommitMessage).toHaveBeenCalledWith(aiPreferences);
+    expect(result.current.commitMessage).toBe(
+      "feat(ui): add AI commit messages",
+    );
+    expect(result.current.generatingCommitMessage).toBe(false);
+    expect(result.current.notice).toContain("staged diff was truncated");
+    expect(result.current.notice).toContain("1 sensitive file was excluded");
+  });
+
+  it("keeps a manual draft when it changes during AI generation", async () => {
+    const client = createTestClient();
+    let finishGeneration!: (result: {
+      message: string;
+      truncated: boolean;
+      excludedFiles: string[];
+    }) => void;
+    client.generateCommitMessage.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishGeneration = resolve;
+        }),
+    );
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    let generationPromise!: Promise<boolean>;
+    act(() => {
+      generationPromise = result.current.generateCommitMessage(aiPreferences);
+    });
+    await waitFor(() =>
+      expect(result.current.generatingCommitMessage).toBe(true),
+    );
+    expect(result.current.busyAction).toBeNull();
+
+    act(() => result.current.setCommitMessage("Manual draft"));
+    expect(result.current.generatingCommitMessage).toBe(false);
+
+    await act(async () => {
+      finishGeneration({
+        message: "feat(ui): stale generated message",
+        truncated: false,
+        excludedFiles: [],
+      });
+      expect(await generationPromise).toBe(false);
+    });
+    expect(result.current.commitMessage).toBe("Manual draft");
+  });
+
+  it("reports AI generation failures through workspace feedback", async () => {
+    const client = createTestClient();
+    client.generateCommitMessage.mockRejectedValueOnce(
+      new Error("AI API key is not configured"),
+    );
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    await act(async () => {
+      expect(
+        await result.current.generateCommitMessage(aiPreferences),
+      ).toBe(false);
+    });
+
+    expect(result.current.error).toBe("AI API key is not configured");
+    expect(result.current.generatingCommitMessage).toBe(false);
   });
 
   it("retains the commit message after a failed commit", async () => {

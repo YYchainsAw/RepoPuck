@@ -93,7 +93,7 @@ impl RepositoryState {
         self.install_selection(service, intent, true)
     }
 
-    fn with_service<T>(
+    pub(crate) fn with_service<T>(
         &self,
         operation: impl FnOnce(&GitService) -> Result<T, GitError>,
     ) -> Result<T, String> {

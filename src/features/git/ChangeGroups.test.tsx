@@ -65,6 +65,7 @@ describe("ChangeGroups", () => {
       <ChangeGroups
         changes={gameChanges}
         busy={false}
+        gameProjectDetected
         onSetStaged={vi.fn()}
       />,
     );
@@ -79,6 +80,36 @@ describe("ChangeGroups", () => {
     expect(
       screen.queryByRole("heading", { name: /^Changes / }),
     ).not.toBeInTheDocument();
+  });
+
+  it("does not enable game grouping without an explicitly detected game project", () => {
+    render(
+      <ChangeGroups
+        changes={[{ ...changes[0], gameCategory: "code" }]}
+        busy={false}
+        onSetStaged={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Changes 1" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /^Code / }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps uncategorized files visible in a detected game project", () => {
+    render(
+      <ChangeGroups
+        changes={[changes[0]]}
+        busy={false}
+        gameProjectDetected
+        onSetStaged={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Other changes 1" }),
+    ).toBeInTheDocument();
   });
 
   it("stages one accessible row", () => {

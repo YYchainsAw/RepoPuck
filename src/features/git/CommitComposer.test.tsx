@@ -12,7 +12,9 @@ describe("CommitComposer", () => {
         message="Ship it"
         hasStaged
         busyAction={null}
+        generating={false}
         onMessageChange={setMessage}
+        onGenerate={vi.fn()}
         onCommit={vi.fn()}
         onCommitAndPush={vi.fn()}
       />,
@@ -33,7 +35,9 @@ describe("CommitComposer", () => {
         message="Ship it"
         hasStaged
         busyAction={null}
+        generating={false}
         onMessageChange={vi.fn()}
+        onGenerate={vi.fn()}
         onCommit={onCommit}
         onCommitAndPush={onCommitAndPush}
       />,
@@ -53,7 +57,9 @@ describe("CommitComposer", () => {
         message="Ship it"
         hasStaged
         busyAction={null}
+        generating={false}
         onMessageChange={vi.fn()}
+        onGenerate={vi.fn()}
         onCommit={onCommit}
         onCommitAndPush={onCommitAndPush}
       />,
@@ -74,7 +80,9 @@ describe("CommitComposer", () => {
         message="候補"
         hasStaged
         busyAction={null}
+        generating={false}
         onMessageChange={vi.fn()}
+        onGenerate={vi.fn()}
         onCommit={onCommit}
         onCommitAndPush={onCommitAndPush}
       />,
@@ -96,7 +104,9 @@ describe("CommitComposer", () => {
     render(
       <CommitComposer
         {...props}
+        generating={false}
         onMessageChange={vi.fn()}
+        onGenerate={vi.fn()}
         onCommit={vi.fn()}
         onCommitAndPush={vi.fn()}
       />,
@@ -104,5 +114,71 @@ describe("CommitComposer", () => {
 
     expect(screen.getByRole("button", { name: /Commit$/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Commit & Push/ })).toBeDisabled();
+  });
+
+  it("generates from staged changes without disabling manual input", () => {
+    const onGenerate = vi.fn();
+    const onMessageChange = vi.fn();
+    const { rerender } = render(
+      <CommitComposer
+        message=""
+        hasStaged
+        busyAction={null}
+        generating={false}
+        onMessageChange={onMessageChange}
+        onGenerate={onGenerate}
+        onCommit={vi.fn()}
+        onCommitAndPush={vi.fn()}
+      />,
+    );
+
+    const generateButton = screen.getByRole("button", {
+      name: "Generate commit message with AI",
+    });
+    expect(generateButton).toHaveTextContent("AI");
+    expect(generateButton).not.toHaveTextContent("Generate");
+    expect(generateButton.querySelector("svg")).toBeNull();
+    fireEvent.click(generateButton);
+    expect(onGenerate).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <CommitComposer
+        message=""
+        hasStaged
+        busyAction={null}
+        generating
+        onMessageChange={onMessageChange}
+        onGenerate={onGenerate}
+        onCommit={vi.fn()}
+        onCommitAndPush={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Generate commit message with AI" }),
+    ).toBeDisabled();
+    const input = screen.getByRole("textbox", { name: "Commit message" });
+    expect(input).not.toBeDisabled();
+    fireEvent.change(input, { target: { value: "Manual draft" } });
+    expect(onMessageChange).toHaveBeenCalledWith("Manual draft");
+  });
+
+  it("requires at least one staged file before AI generation", () => {
+    render(
+      <CommitComposer
+        message=""
+        hasStaged={false}
+        busyAction={null}
+        generating={false}
+        onMessageChange={vi.fn()}
+        onGenerate={vi.fn()}
+        onCommit={vi.fn()}
+        onCommitAndPush={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Generate commit message with AI" }),
+    ).toBeDisabled();
   });
 });

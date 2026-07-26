@@ -15,6 +15,8 @@ import {
   type KeyboardEvent,
   type RefObject,
 } from "react";
+import { useI18n } from "../../i18n";
+import { getShellCopy } from "../../i18n/shell";
 
 interface MenuAction {
   label: string;
@@ -51,15 +53,17 @@ export function ActionMenu({
   onAmendLastCommit,
   actions,
 }: ActionMenuProps) {
+  const { language } = useI18n();
+  const copy = getShellCopy(language);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const items: MenuAction[] = [
-    { label: "Fetch", icon: SyncIcon, run: actions.fetch },
-    { label: "Pull", icon: DownloadIcon, run: actions.pull },
-    { label: "Push", icon: UploadIcon, detail: remoteName, run: actions.push },
-    { label: "Stash", icon: ArchiveIcon, run: actions.stash },
-    { label: "Open terminal", icon: TerminalIcon, run: actions.openTerminal },
-    { label: "Open Explorer", icon: FileDirectoryIcon, run: actions.openExplorer },
+    { label: copy.menu.fetch, icon: SyncIcon, run: actions.fetch },
+    { label: copy.menu.pull, icon: DownloadIcon, run: actions.pull },
+    { label: copy.menu.push, icon: UploadIcon, detail: remoteName, run: actions.push },
+    { label: copy.menu.stash, icon: ArchiveIcon, run: actions.stash },
+    { label: copy.menu.openTerminal, icon: TerminalIcon, run: actions.openTerminal },
+    { label: copy.menu.openExplorer, icon: FileDirectoryIcon, run: actions.openExplorer },
   ];
 
   const getEnabledItems = () =>
@@ -129,7 +133,7 @@ export function ActionMenu({
       ref={menuRef}
       className="action-menu"
       role="menu"
-      aria-label="Repository actions"
+      aria-label={copy.menu.repositoryActions}
       onKeyDown={moveFocus}
     >
       {items.map(({ label, icon: Icon, detail, run }, index) => (
@@ -163,7 +167,7 @@ export function ActionMenu({
         }}
       >
         <GitCommitIcon size={16} aria-hidden="true" />
-        Amend last commit
+        {copy.menu.amendLastCommit}
       </button>
       <button
         className="action-menu-item"
@@ -177,7 +181,7 @@ export function ActionMenu({
         }}
       >
         <GearIcon size={16} aria-hidden="true" />
-        Settings
+        {copy.menu.settings}
       </button>
     </div>
   );

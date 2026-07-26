@@ -66,11 +66,13 @@ function createWorkspace(overrides: Partial<GitWorkspaceValue> = {}): GitWorkspa
     selectedRepository: snapshot.repository,
     commitMessage: "Ship it",
     busyAction: null,
+    generatingCommitMessage: false,
     notice: null,
     clearNotice: vi.fn(),
     error: null,
     refresh: vi.fn(),
     setCommitMessage: vi.fn(),
+    generateCommitMessage: vi.fn(),
     selectRepository: vi.fn(),
     setStaged: vi.fn(),
     commit: vi.fn(),
@@ -97,6 +99,8 @@ beforeEach(() => {
     colorMode: "light",
     setTheme: vi.fn(),
     setPinned: vi.fn(),
+    setLanguage: vi.fn(),
+    setAiCommitPreferences: vi.fn(),
     rememberRepository: vi.fn(),
     clearRecentRepositories: vi.fn(),
   };
@@ -130,6 +134,54 @@ beforeEach(() => {
 });
 
 describe("PanelShell", () => {
+  it("generates a commit message with the saved AI preferences", () => {
+    const generateCommitMessage = vi.fn();
+    workspace.current = createWorkspace({ generateCommitMessage });
+    shell.current = {
+      ...shell.current,
+      settings: {
+        ...shell.current.settings,
+        aiCommit: {
+          baseUrl: "https://example.ai/v1",
+          model: "game-commit-model",
+          language: "zh-CN",
+          commitType: "feat",
+          scope: "unity",
+        },
+      },
+    };
+
+    render(<PanelShell />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Generate commit message with AI" }),
+    );
+
+    expect(generateCommitMessage).toHaveBeenCalledWith({
+      baseUrl: "https://example.ai/v1",
+      model: "game-commit-model",
+      language: "zh-CN",
+      commitType: "feat",
+      scope: "unity",
+    });
+  });
+
+  it("shows AI generation progress without marking a Git action busy", () => {
+    workspace.current = createWorkspace({
+      busyAction: null,
+      generatingCommitMessage: true,
+    });
+
+    render(<PanelShell />);
+
+    expect(screen.getByText("Generating commit message…")).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "RepoPuck Git panel" }),
+    ).toHaveAttribute("aria-busy", "true");
+    expect(
+      screen.getByRole("textbox", { name: "Commit message" }),
+    ).not.toBeDisabled();
+  });
+
   it("shows detected game project context and safety checks above changes", () => {
     workspace.current = createWorkspace({
       snapshot: {
@@ -159,6 +211,27 @@ describe("PanelShell", () => {
       screen.getByRole("button", { name: /Game project checks/ }),
     ).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Missing .meta file")).toBeInTheDocument();
+  });
+
+  it("keeps game-only context and file groups hidden in a regular Git repository", () => {
+    workspace.current = createWorkspace({
+      snapshot: {
+        ...snapshot,
+        changes: [
+          {
+            ...snapshot.changes[0],
+            path: "content/example.scene",
+            gameCategory: "scene",
+          },
+        ],
+      },
+    });
+
+    render(<PanelShell />);
+
+    expect(screen.getByRole("heading", { name: "Changes 1" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Scenes 1" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Unity|Unreal|Game project checks/)).not.toBeInTheDocument();
   });
 
   it("reopens danger checks when switching nested projects in one repository", () => {

@@ -1,5 +1,6 @@
 #![allow(linker_messages)]
 
+mod ai;
 mod commands;
 mod external_launch;
 mod game_projects;
@@ -34,6 +35,10 @@ pub fn run() {
         })
         .on_window_event(windowing::handle_window_event)
         .invoke_handler(tauri::generate_handler![
+            ai::get_ai_key_status,
+            ai::save_ai_api_key,
+            ai::delete_ai_api_key,
+            ai::generate_commit_message,
             commands::select_repository,
             commands::get_snapshot,
             commands::get_change_count,

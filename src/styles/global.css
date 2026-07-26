@@ -708,6 +708,14 @@ html[data-window-view="puck"][data-shell-mode="top-drawer"] #root {
 }
 
 .composer-input-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.composer-input-control {
+  flex: 1 1 auto;
+  min-width: 0;
   position: relative;
 }
 
@@ -727,6 +735,18 @@ html[data-window-view="puck"][data-shell-mode="top-drawer"] #root {
   right: 10px;
   top: 50%;
   transform: translateY(-50%);
+}
+
+.ai-generate-button {
+  flex: 0 0 auto;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  height: 36px;
+  letter-spacing: 0.02em;
+  min-height: 36px;
+  min-width: 36px;
+  padding-inline: 0 !important;
+  width: 36px;
 }
 
 .composer-actions {

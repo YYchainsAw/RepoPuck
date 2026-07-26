@@ -103,6 +103,26 @@ export function createDemoGitClient(): GitClient {
     stage: (paths) => updateStaged(paths, true),
     unstage: (paths) => updateStaged(paths, false),
     commit,
+    generateCommitMessage: async (request) => {
+      const stagedChanges = snapshot.changes.filter((change) => change.staged);
+      if (stagedChanges.length === 0) {
+        throw new Error("Stage at least one file before generating a message.");
+      }
+
+      const scope = request.scope.trim();
+      const prefix = scope
+        ? `${request.commitType}(${scope}):`
+        : `${request.commitType}:`;
+      const subject =
+        request.language === "zh-CN"
+          ? "更新暂存的项目文件"
+          : "update staged project files";
+      return {
+        message: `${prefix} ${subject}`,
+        truncated: false,
+        excludedFiles: [],
+      };
+    },
     amendLastCommit: (message) =>
       success(message?.trim() ? "Last commit amended with a new message" : "Last commit amended"),
     push: async () => {

@@ -1,11 +1,14 @@
 import { CounterLabel, Heading } from "@primer/react";
 import { useEffect, useRef } from "react";
+import { useI18n } from "../../i18n";
+import { getGitCopy } from "../../i18n/git";
 import type { ChangeEntry } from "./types";
 import { ChangeRow } from "./ChangeRow";
 
 interface ChangeGroupsProps {
   changes: ChangeEntry[];
   busy: boolean;
+  gameProjectDetected?: boolean;
   onSetStaged(paths: string[], staged: boolean): void;
 }
 
@@ -21,6 +24,8 @@ function ChangeGroup({
   busy,
   onSetStaged,
 }: ChangeGroupProps) {
+  const { language } = useI18n();
+  const copy = getGitCopy(language);
   const allStaged = changes.length > 0 && changes.every((change) => change.staged);
   const someStaged = changes.some((change) => change.staged);
   const partiallyStaged = someStaged && !allStaged;
@@ -47,7 +52,9 @@ function ChangeGroup({
           checked={allStaged}
           disabled={busy}
           aria-checked={partiallyStaged ? "mixed" : allStaged}
-          aria-label={`${allStaged ? "Unstage" : "Stage"} all ${title}`}
+          aria-label={
+            allStaged ? copy.unstageAll(title) : copy.stageAll(title)
+          }
           onChange={() => onSetStaged(paths, !allStaged)}
         />
         <Heading as="h2" className="change-group-title" aria-label={`${title} ${changes.length}`}>
@@ -69,24 +76,31 @@ function ChangeGroup({
   );
 }
 
-export function ChangeGroups({ changes, busy, onSetStaged }: ChangeGroupsProps) {
+export function ChangeGroups({
+  changes,
+  busy,
+  gameProjectDetected = false,
+  onSetStaged,
+}: ChangeGroupsProps) {
+  const { language } = useI18n();
+  const copy = getGitCopy(language);
   const tracked = changes.filter((change) => !change.untracked || change.staged);
   const unversioned = changes.filter((change) => change.untracked && !change.staged);
   const gameCategories = [
-    ["code", "Code"],
-    ["scene", "Scenes & Blueprints"],
-    ["asset", "Assets"],
-    ["config", "Configuration"],
-    ["generated", "Generated files"],
-    ["other", "Other changes"],
+    ["code", copy.categories.code],
+    ["scene", copy.categories.scene],
+    ["asset", copy.categories.asset],
+    ["config", copy.categories.config],
+    ["generated", copy.categories.generated],
+    ["other", copy.categories.other],
   ] as const;
-  const gameMode = changes.some((change) => change.gameCategory !== undefined);
+  const gameMode = gameProjectDetected;
 
   if (changes.length === 0) {
     return (
       <div className="changes-empty">
-        <Heading as="h2">Working tree clean</Heading>
-        <p>There are no local changes.</p>
+        <Heading as="h2">{copy.workingTreeClean}</Heading>
+        <p>{copy.noLocalChanges}</p>
       </div>
     );
   }
@@ -96,7 +110,9 @@ export function ChangeGroups({ changes, busy, onSetStaged }: ChangeGroupsProps) 
       {gameMode
         ? gameCategories.map(([category, title]) => {
             const categoryChanges = tracked.filter(
-              (change) => change.gameCategory === category,
+              (change) =>
+                change.gameCategory === category ||
+                (category === "other" && change.gameCategory === undefined),
             );
             return categoryChanges.length > 0 ? (
               <ChangeGroup
@@ -111,7 +127,7 @@ export function ChangeGroups({ changes, busy, onSetStaged }: ChangeGroupsProps) 
           })
         : tracked.length > 0 && (
             <ChangeGroup
-              title="Changes"
+              title={copy.changes}
               changes={tracked}
               busy={busy}
               onSetStaged={onSetStaged}
@@ -119,7 +135,7 @@ export function ChangeGroups({ changes, busy, onSetStaged }: ChangeGroupsProps) 
           )}
       {unversioned.length > 0 && (
         <ChangeGroup
-          title="Unversioned files"
+          title={copy.unversionedFiles}
           changes={unversioned}
           busy={busy}
           onSetStaged={onSetStaged}

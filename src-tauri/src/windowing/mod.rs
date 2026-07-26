@@ -1,4 +1,5 @@
 pub mod drawer;
+pub mod i18n;
 pub mod position;
 pub mod settings;
 pub mod state;
@@ -12,8 +13,8 @@ use std::{collections::HashMap, time::Duration, time::Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::{
-    App, AppHandle, Emitter, LogicalSize, Manager, Monitor, PhysicalPosition, PhysicalSize,
-    WebviewWindow, Window, WindowEvent, Wry,
+    App, AppHandle, Emitter, Listener, LogicalSize, Manager, Monitor, PhysicalPosition,
+    PhysicalSize, WebviewWindow, Window, WindowEvent, Wry,
 };
 use tauri_plugin_store::StoreExt;
 
@@ -57,7 +58,13 @@ pub struct ShellState {
     drawer_shutdown: AtomicBool,
 }
 
-pub struct PuckMenu(pub tauri::menu::Menu<Wry>);
+pub struct PuckMenu {
+    pub(crate) menu: tauri::menu::Menu<Wry>,
+    pub(crate) open_panel: tauri::menu::MenuItem<Wry>,
+    pub(crate) refresh: tauri::menu::MenuItem<Wry>,
+    pub(crate) settings: tauri::menu::MenuItem<Wry>,
+    pub(crate) quit: tauri::menu::MenuItem<Wry>,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PanelAction {
@@ -181,7 +188,16 @@ pub fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     configure_launcher(app, mode)?;
 
     let menu = tray::setup(app)?;
-    app.manage(PuckMenu(menu));
+    app.manage(menu);
+    let language_app = app.handle().clone();
+    app.listen("interface_language_changed", move |event| {
+        let Some(payload) = i18n::parse_language_changed(event.payload()) else {
+            return;
+        };
+        let language = i18n::language_from_tag(&payload.resolved);
+        let _ = i18n::persist_preference(&language_app, &payload.preference);
+        let _ = tray::set_language(&language_app, language);
+    });
     drawer::start(app.handle().clone());
     Ok(())
 }
@@ -262,7 +278,7 @@ pub fn show_puck_menu(
     if window.label() != PUCK_LABEL {
         return Err("The RepoPuck menu is only available from the puck".to_owned());
     }
-    window.popup_menu(&menu.0).map_err(safe_window_error)
+    window.popup_menu(&menu.menu).map_err(safe_window_error)
 }
 
 pub fn handle_window_event(window: &Window, event: &WindowEvent) {

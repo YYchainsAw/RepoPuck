@@ -1,5 +1,7 @@
 import { BaseStyles, Button, Dialog, Spinner, TextInput, ThemeProvider } from "@primer/react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useI18n } from "../../i18n";
+import { getShellCopy } from "../../i18n/shell";
 import { GameProjectBanner, GameSafetyPanel } from "../game";
 import { ChangeGroups } from "../git/ChangeGroups";
 import { CommitComposer } from "../git/CommitComposer";
@@ -8,30 +10,17 @@ import { useGitWorkspace } from "../git/useGitWorkspace";
 import { ActionMenu } from "./ActionMenu";
 import { DrawerDragHandle } from "./DrawerDragHandle";
 import { Header } from "./Header";
+import { LocalizedDialogHeader } from "./LocalizedDialogHeader";
 import { createNativeShellClient } from "./nativeClient";
 import { Notice } from "./Notice";
 import { SettingsDialog } from "./SettingsDialog";
+import { getAICommitPreferences } from "./settings";
 import { useShellSettings } from "./ShellSettingsProvider";
 import { useNativeShellState } from "./useNativeShellState";
 
-const busyLabels = {
-  selectRepository: "Choosing repository…",
-  stage: "Staging…",
-  unstage: "Unstaging…",
-  commit: "Committing…",
-  amendLastCommit: "Amending last commit…",
-  push: "Pushing…",
-  commitAndPush: "Committing and pushing…",
-  switchBranch: "Switching branch…",
-  createBranch: "Creating branch…",
-  fetch: "Fetching…",
-  pull: "Pulling…",
-  stash: "Stashing…",
-  openTerminal: "Opening terminal…",
-  openExplorer: "Opening Explorer…",
-} as const;
-
 export function PanelShell() {
+  const { language } = useI18n();
+  const copy = getShellCopy(language);
   const workspace = useGitWorkspace();
   const shell = useShellSettings();
   const nativeShell = useNativeShellState();
@@ -115,7 +104,13 @@ export function PanelShell() {
       {workspace.busyAction && (
         <div className="busy-status" aria-live="polite">
           <Spinner size="small" />
-          <span>{busyLabels[workspace.busyAction]}</span>
+          <span>{copy.panel.busy[workspace.busyAction]}</span>
+        </div>
+      )}
+      {workspace.generatingCommitMessage && (
+        <div className="busy-status" aria-live="polite">
+          <Spinner size="small" />
+          <span>{copy.panel.generatingCommitMessage}</span>
         </div>
       )}
     </>
@@ -127,8 +122,8 @@ export function PanelShell() {
         <section
           className="panel-shell panel-shell--responsive"
           role="region"
-          aria-label="RepoPuck Git panel"
-          aria-busy={busy}
+          aria-label={copy.panel.ariaLabel}
+          aria-busy={busy || workspace.generatingCommitMessage}
           data-color-mode={dark ? "dark" : "light"}
           data-pinned={pinned}
           data-min-width="360"
@@ -178,7 +173,7 @@ export function PanelShell() {
                 />
               </div>
               {feedback}
-              <main className="changes-scroll" aria-label="Repository changes">
+              <main className="changes-scroll" aria-label={copy.panel.repositoryChanges}>
                 {workspace.snapshot.gameProject && (
                   <div className="game-project-context">
                     <GameProjectBanner
@@ -202,6 +197,11 @@ export function PanelShell() {
                 <ChangeGroups
                   changes={workspace.snapshot.changes}
                   busy={busy}
+                  gameProjectDetected={Boolean(
+                    workspace.snapshot.gameProject &&
+                      (workspace.snapshot.gameProject.engine === "unity" ||
+                        workspace.snapshot.gameProject.engine === "unreal"),
+                  )}
                   onSetStaged={(paths, staged) => void workspace.setStaged(paths, staged)}
                 />
               </main>
@@ -209,7 +209,13 @@ export function PanelShell() {
                 message={workspace.commitMessage}
                 hasStaged={workspace.snapshot.changes.some((change) => change.staged)}
                 busyAction={workspace.busyAction}
+                generating={workspace.generatingCommitMessage}
                 onMessageChange={workspace.setCommitMessage}
+                onGenerate={() =>
+                  void workspace.generateCommitMessage(
+                    getAICommitPreferences(shell.settings),
+                  )
+                }
                 onCommit={() => void workspace.commit()}
                 onCommitAndPush={() => void workspace.commitAndPush()}
               />
@@ -226,7 +232,11 @@ export function PanelShell() {
             </>
           )}
           {createBranchOpen && (
-            <Dialog title="Create branch" onClose={() => setCreateBranchOpen(false)}>
+            <Dialog
+              title={copy.panel.createBranch}
+              renderHeader={LocalizedDialogHeader}
+              onClose={() => setCreateBranchOpen(false)}
+            >
               <form
                 className="create-branch-form"
                 onSubmit={(event) => {
@@ -234,23 +244,27 @@ export function PanelShell() {
                   createBranch();
                 }}
               >
-                <label htmlFor="new-branch-name">New branch name</label>
+                <label htmlFor="new-branch-name">{copy.panel.newBranchName}</label>
                 <TextInput
                   id="new-branch-name"
-                  aria-label="New branch name"
+                  aria-label={copy.panel.newBranchName}
                   value={branchName}
                   autoFocus
                   onChange={(event) => setBranchName(event.target.value)}
                   block
                 />
                 <Button type="submit" variant="primary" disabled={!branchName.trim() || busy}>
-                  Create
+                  {copy.panel.create}
                 </Button>
               </form>
             </Dialog>
           )}
           {amendOpen && (
-            <Dialog title="Amend last commit" onClose={() => setAmendOpen(false)}>
+            <Dialog
+              title={copy.panel.amendLastCommit}
+              renderHeader={LocalizedDialogHeader}
+              onClose={() => setAmendOpen(false)}
+            >
               <form
                 className="create-branch-form"
                 onSubmit={(event) => {
@@ -260,26 +274,26 @@ export function PanelShell() {
                   setAmendOpen(false);
                 }}
               >
-                <p>
-                  Amending rewrites the latest local commit. RepoPuck never force-pushes.
-                </p>
-                <label htmlFor="amend-commit-message">Optional commit message</label>
+                <p>{copy.panel.amendWarning}</p>
+                <label htmlFor="amend-commit-message">
+                  {copy.panel.optionalCommitMessage}
+                </label>
                 <TextInput
                   id="amend-commit-message"
-                  aria-label="Optional commit message"
+                  aria-label={copy.panel.optionalCommitMessage}
                   value={workspace.commitMessage}
                   autoFocus
                   onChange={(event) => workspace.setCommitMessage(event.target.value)}
-                  placeholder="Keep the existing commit message"
+                  placeholder={copy.panel.keepExistingMessage}
                   block
                 />
-                <p>Staged files, if any, are included. Leave this blank to keep the existing message.</p>
+                <p>{copy.panel.amendFilesHelp}</p>
                 <div className="dialog-actions">
                   <Button type="button" onClick={() => setAmendOpen(false)} disabled={busy}>
-                    Cancel
+                    {copy.panel.cancel}
                   </Button>
                   <Button type="submit" variant="primary" disabled={busy}>
-                    Amend commit
+                    {copy.panel.amendCommit}
                   </Button>
                 </div>
               </form>

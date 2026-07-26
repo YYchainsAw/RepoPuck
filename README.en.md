@@ -4,7 +4,7 @@
   <h1>RepoPuck</h1>
 
   <p><strong>Small on screen. Fast in flow.</strong></p>
-  <p>A lightweight desktop Git companion for Windows, built for Unity, Unreal Engine, and Visual Studio workflows.</p>
+  <p>A lightweight Windows Git companion with optional Unity and Unreal enhancements when detected.</p>
 
   <p>
     <a href="README.md">简体中文</a>
@@ -31,7 +31,7 @@
 
 <br>
 
-RepoPuck keeps the Git actions you use every day in a small panel that is always close by. Select files, switch branches, commit, and push without repeatedly leaving Unity, Unreal Editor, Visual Studio, or your current workspace—and without opening a full Git client for a tiny commit.
+RepoPuck keeps everyday Git actions in a small panel that is always close by. Whether you are working in an ordinary code repository, a Visual Studio solution, or a game project, you can select files, switch branches, commit, and push without opening a full Git client for a tiny change.
 
 > [!IMPORTANT]
 > **RepoPuck does not require a Unity package or Unreal plugin.** Select a project manually and game-project detection, semantic file groups, and safety checks work immediately. The included editor bridges are optional and only wake RepoPuck when an editor opens.
@@ -43,12 +43,16 @@ RepoPuck keeps the Git actions you use every day in a small panel that is always
 ## ✨ Why RepoPuck?
 
 - ⚡ **A shorter commit path** — select files, write a message, then choose **Commit** or **Commit & Push**.
-- 🎮 **Built for game development** — recognize Unity and Unreal projects and separate code, scenes, Blueprints, assets, configuration, and generated files.
+- 🤖 **AI commit-message drafts** — use your own OpenAI-compatible API to turn staged changes into Chinese or English Conventional Commits.
+- 🎮 **Game-aware only when relevant** — semantic groups and pre-commit guidance appear only after RepoPuck detects a Unity or Unreal project; ordinary repositories keep a focused Git interface.
 - 🧩 **Three desktop surfaces** — use a floating puck, an attached top island, or an auto-revealing top drawer.
 - 🪶 **Lightweight and focused** — common actions stay visible while secondary actions live in the More menu.
 - 🌗 **A familiar GitHub-style interface** — powered by GitHub Primer with light, dark, and system themes.
+- 🌐 **简体中文 and English** — follow the system language by default or switch manually in Settings.
 - 🔐 **No GitHub account lock-in** — reuse system Git, Git Credential Manager, or SSH.
 - 🖥️ **Native Windows behavior** — system tray, always-on-top launchers, hidden console processes, DPI and multi-monitor support, and restored geometry.
+
+The interface follows the Windows language by default. Choose **System, 中文, or English** from **More → Settings → Interface language** to update the panel, puck or island, tray menu, and native confirmation dialogs together without restarting.
 
 ## 🧭 Three desktop modes
 
@@ -66,9 +70,9 @@ Choose a mode from **More → Settings → Launch mode**. Every mode uses the sa
 
 The panel is resizable and remembers a separate size for each mode. The drawer uses a native cursor hot zone instead of a transparent WebView covering the desktop, so it does not block clicks near the top edge while hidden.
 
-## 🎮 Made for Unity, Unreal, and Visual Studio
+## 🎮 Game-project enhancements when detected
 
-RepoPuck stays simple for ordinary Git repositories and adds read-only analysis when it detects a game project.
+RepoPuck remains a lightweight Git tool first. Ordinary repositories show only the generic Git workflow; a game-project banner, semantic groups, and additional read-only safety analysis appear only after the selected folder is positively detected as Unity or Unreal.
 
 ### Project detection
 
@@ -109,7 +113,7 @@ These checks are **advisory**. RepoPuck does not rewrite `.gitignore` or `.gitat
 - 👀 Review **Changes** and **Unversioned files** separately.
 - ☑️ Stage or unstage individual files and complete groups.
 - 🌿 Switch local branches or create a new branch.
-- 💬 Write a commit message with a focused 72-character guide.
+- 💬 Write a commit message yourself or generate a draft from staged changes, with a focused 72-character limit.
 - ✅ Commit locally without pushing.
 - 🚀 Use the separate **Commit & Push** action or push later.
 - ✏️ Amend the most recent local commit after confirmation, without an automatic force-push.
@@ -123,6 +127,20 @@ Keyboard shortcuts:
 - `Win + B` — reach the RepoPuck tray menu through the Windows notification area, including when the top drawer is hidden
 
 RepoPuck intentionally leaves merge, rebase, cherry-pick, destructive reset, conflict editing, remote management, and force-push to your IDE or terminal. Keeping high-risk and low-frequency operations outside the panel makes the common path lighter and safer.
+
+## 🤖 AI-generated commit messages
+
+AI assistance is optional and never replaces the manual commit flow:
+
+1. Open **More → Settings → AI commit message**.
+2. Enter an OpenAI-compatible Base URL, model name, and API key.
+3. Choose Chinese or English, a commit type such as `feat`, `fix`, or `docs`, and an optional scope.
+4. Stage files and select the compact **AI** button beside the commit field. RepoPuck fills the draft but never commits or pushes automatically.
+
+RepoPuck assembles the Conventional Commit prefix locally, so results consistently follow forms such as `feat: subject` or `feat(ui): subject`. You can edit every generated draft before committing.
+
+> [!IMPORTANT]
+> The API key is stored only in **Windows Credential Manager** for the current user. It is never written to `settings.json`, browser storage, logs, or the repository. RepoPuck sends a size-bounded **staged text diff** only when you explicitly generate a message; known sensitive paths and binary contents are excluded, and common secret-looking lines are redacted. Automatic filtering cannot identify every secret, so review the staged content and your provider's privacy policy before using any third-party service.
 
 ## 🚀 Quick start
 
@@ -178,7 +196,7 @@ RepoPuck does not ask you to sign in to GitHub and does not store GitHub tokens,
 
 ### Local data
 
-RepoPuck persists only non-secret convenience settings: theme, pin state, shell mode, panel size, launcher position, selected display, drawer position, and a bounded list of recent repository paths. It does not store commit contents, repository file contents, or cursor history.
+RepoPuck persists only non-secret convenience settings: theme, pin state, shell mode, panel size, launcher position, selected display, drawer position, a bounded list of recent repository paths, and AI endpoint, model, language, and commit-format preferences. It does not store commit contents, repository file contents, or cursor history; the optional AI API key is stored separately in Windows Credential Manager.
 
 ### Git processes
 
@@ -195,6 +213,7 @@ The Rust core launches `git` directly with an argument array rather than interpo
 | Build tooling | **Vite 6.4 + pnpm 10** | Development, locked dependencies, and production builds |
 | Testing | **Vitest 3 + Testing Library + Rust tests** | UI, Git services, window state machines, geometry, and accessibility |
 | Git engine | **System Git CLI** | Repository status and local/remote operations |
+| AI interface | **OpenAI-compatible Chat Completions** | User-supplied service for staged-diff commit drafts |
 | Automation | **GitHub Actions** | Frontend checks, Rust checks, and Windows MSI builds |
 
 The application reuses one lightweight launcher WebView and one shared Git panel WebView. React calls typed Tauri commands; repository validation, Git operations, game-project analysis, and shell state stay inside the Rust boundary.
@@ -257,15 +276,16 @@ pnpm tauri build --bundles msi
 - [x] 📜 Movable, auto-revealing top drawer
 - [x] 📐 Resizable panel with per-mode saved geometry
 - [x] 🌗 Light, dark, and system themes
+- [x] 🌍 Simplified Chinese / English interface with system and manual selection
 - [x] ✅ Common Git commit, push, sync, and branch workflows
 - [x] 🎮 Unity / Unreal detection and semantic file groups
 - [x] 🛡️ `.meta`, generated-file, large-file, and Git LFS guidance
 - [x] 🔗 Single-instance CLI, deep links, and optional editor bridge source
+- [x] 🤖 Optional Chinese and English AI Conventional Commit drafts
 - [ ] 🎮 Validate the bridges in more real Unity and Unreal editor versions
 - [ ] 🔏 Windows code signing
 - [ ] ⌨️ Configurable global keyboard shortcut
 - [ ] 🔔 Optional push and fetch notifications
-- [ ] 🌍 Additional interface languages
 
 The roadmap follows real workflow feedback. Focused ideas and bug reports are welcome in [GitHub Issues](https://github.com/YYchainsAw/RepoPuck/issues).
 

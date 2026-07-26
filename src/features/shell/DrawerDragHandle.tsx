@@ -1,6 +1,8 @@
 import { GrabberIcon } from "@primer/octicons-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { PointerEvent as ReactPointerEvent } from "react";
+import { useI18n } from "../../i18n";
+import { getShellCopy } from "../../i18n/shell";
 import type { ShellMode } from "./useNativeShellState";
 
 interface DrawerDragHandleProps {
@@ -9,6 +11,8 @@ interface DrawerDragHandleProps {
 }
 
 export function DrawerDragHandle({ mode, closing }: DrawerDragHandleProps) {
+  const { language } = useI18n();
+  const copy = getShellCopy(language);
   if (mode !== "top-drawer") return null;
   if (closing) {
     return (
@@ -29,8 +33,8 @@ export function DrawerDragHandle({ mode, closing }: DrawerDragHandleProps) {
     <button
       className="drawer-drag-handle"
       type="button"
-      aria-label="Move top drawer"
-      title="Drag to move the top drawer"
+      aria-label={copy.drawer.move}
+      title={copy.drawer.moveTitle}
       onPointerDown={startDragging}
     >
       <GrabberIcon size={16} aria-hidden="true" />

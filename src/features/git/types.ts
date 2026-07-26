@@ -27,6 +27,35 @@ export interface OperationResult {
   message?: string;
 }
 
+export type AiCommitLanguage = "zh-CN" | "en";
+
+export type ConventionalCommitType =
+  | "feat"
+  | "fix"
+  | "docs"
+  | "style"
+  | "refactor"
+  | "perf"
+  | "test"
+  | "build"
+  | "ci"
+  | "chore"
+  | "revert";
+
+export interface AiCommitPreferences {
+  baseUrl: string;
+  model: string;
+  language: AiCommitLanguage;
+  commitType: ConventionalCommitType;
+  scope: string;
+}
+
+export interface GenerateCommitMessageResult {
+  message: string;
+  truncated: boolean;
+  excludedFiles: string[];
+}
+
 export interface RepositorySnapshot {
   repository: {
     name: string;
@@ -50,6 +79,9 @@ export interface GitClient {
   stage(paths: string[]): Promise<OperationResult>;
   unstage(paths: string[]): Promise<OperationResult>;
   commit(message: string): Promise<OperationResult>;
+  generateCommitMessage(
+    request: AiCommitPreferences,
+  ): Promise<GenerateCommitMessageResult>;
   amendLastCommit(message?: string): Promise<OperationResult>;
   push(): Promise<OperationResult>;
   commitAndPush(message: string): Promise<OperationResult>;
