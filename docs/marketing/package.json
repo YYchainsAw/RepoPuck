@@ -1,0 +1,9 @@
+{
+  "name": "repopuck-marketing-assets",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "gifenc": "1.0.3",
+    "pngjs": "7.0.0"
+  }
+}

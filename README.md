@@ -3,8 +3,8 @@
 
   <h1>RepoPuck</h1>
 
-  <p><strong>随时在桌面，提交只需几秒。</strong></p>
-  <p>轻量 Windows 桌面 Git 助手，让暂存、提交与推送更快一步。</p>
+  <p><strong>不打开 IDE，也能从桌面快速完成暂存、提交与推送。</strong></p>
+  <p>一个随叫随到、无需登录 GitHub 的轻量 Windows Git 助手。</p>
 
   <p>
     <strong>简体中文</strong>
@@ -25,16 +25,26 @@
     ·
     <a href="#-快速开始">快速开始</a>
     ·
+    <a href="https://github.com/YYchainsAw/RepoPuck/discussions">讨论与反馈</a>
+    ·
     <a href="#-参与贡献">参与贡献</a>
   </p>
 </div>
 
 <br>
 
-RepoPuck 把最常用的 Git 操作放在一个随叫随到的小面板里。你可以选择文件、切换分支、提交和推送，而不必为了一个小提交打开完整 Git 客户端。
+RepoPuck 把最常用的 Git 操作放在一个随叫随到的小面板里。选择文件、切换分支、提交和推送，不必为了一个小改动离开当前工作流。
 
 <p align="center">
-  <img src="docs/qa/v020/island-attached-composite.png" width="720" alt="RepoPuck 顶部灵动岛与 Git 面板">
+  <img src="docs/images/repopuck-workflow-demo.gif" width="800" alt="RepoPuck 从桌面入口到完成提交的工作流演示">
+</p>
+
+<p align="center">
+  <strong>无需 GitHub 登录</strong>
+  ·
+  <strong>AI 完全可选</strong>
+  ·
+  <strong>Windows 开源</strong>
 </p>
 
 ## ✨ 为什么选择 RepoPuck？
@@ -51,9 +61,9 @@ RepoPuck 把最常用的 Git 操作放在一个随叫随到的小面板里。你
 
 界面默认跟随 Windows 语言。也可以在 **更多 → 设置 → 界面语言** 中选择 **跟随系统、中文或 English**；面板、悬浮球 / 灵动岛、托盘菜单和原生确认对话框会一起切换，无需重启。
 
-## 🧭 三种桌面模式
+## 🧭 三种桌面入口
 
-在 **更多 → 设置 → 启动模式** 中选择模式。三种模式共享同一个 Git 工作区；切换外观不会改变当前仓库、暂存文件或提交草稿。
+在 **更多 → 设置 → 启动模式** 中选择入口。三种入口共享同一个 Git 工作区；切换外观不会改变当前仓库、暂存文件或提交草稿。
 
 | 模式 | 交互方式 | 适合场景 |
 | --- | --- | --- |
@@ -106,14 +116,14 @@ RepoPuck 在本地强制组装 Conventional Commit 格式，因此可以稳定�
 
 ### 安装
 
-1. 前往 [GitHub Releases](https://github.com/YYchainsAw/RepoPuck/releases/latest) 下载最新 Windows MSI。
-2. 运行安装程序。
-3. 从开始菜单启动 RepoPuck；应用会常驻系统托盘。
+1. 前往 [GitHub Releases](https://github.com/YYchainsAw/RepoPuck/releases/latest)。
+2. 选择标准 MSI 安装包，或下载 `windows-x64-portable.zip` 解压后直接运行。
+3. 安装版从开始菜单启动；两种版本都会让 RepoPuck 常驻系统托盘。
 4. 选择一个本地 Git 仓库。
 5. 勾选要提交的文件，填写提交说明，然后选择 **Commit** 或 **Commit & Push**。
 
 > [!WARNING]
-> 当前安装包尚未进行 Windows 代码签名，Windows 可能显示 **Unknown publisher** 或 Microsoft Defender SmartScreen 提示。请只从本仓库的 GitHub Release 下载，并用 Release notes 中提供的 SHA-256 校验文件。
+> 当前安装包尚未进行 Windows 代码签名，Windows 可能显示 **Unknown publisher** 或 Microsoft Defender SmartScreen 提示。请只从本仓库的 GitHub Release 下载，并使用 `SHA256SUMS.txt` 与 Release 中的 GitHub 构建来源证明进行校验。
 
 ### 运行要求
 
@@ -284,15 +294,16 @@ RepoPuck 专注于高频、低摩擦的提交路径。复杂历史操作继续�
 
 ## 🤝 参与贡献
 
-请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。开发基于 `develop` 分支，推荐使用小而完整的提交，并在提交 Pull Request 前运行完整质量检查。
+请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。使用问题可以从 [SUPPORT.md](SUPPORT.md) 开始；开发基于 `develop` 分支，推荐使用小而完整的提交，并在提交 Pull Request 前运行完整质量检查。
 
 提交窗口、托盘、Git 进程或打包相关改动时，请同时进行 Windows 原生冒烟测试；可见界面改动请附浅色/深色以及最小面板尺寸下的截图。
 
 如果 RepoPuck 让你的提交工作流更顺手：
 
 - ⭐ 给仓库一个 Star，让更多 Windows 开发者看到它。
-- 🐛 提交可复现的 Issue。
-- 💡 分享真实项目中的工作流需求。
+- 🐛 使用 [Bug 表单](https://github.com/YYchainsAw/RepoPuck/issues/new?template=bug_report.yml)提交可复现的问题。
+- 💡 使用 [工作流反馈表单](https://github.com/YYchainsAw/RepoPuck/issues/new?template=workflow_feedback.yml)分享真实的 Git 流程与阻力。
+- 💬 在 [Discussions](https://github.com/YYchainsAw/RepoPuck/discussions)交流安装、使用方法和想法。
 - 🧑‍💻 修复问题或提交聚焦的 Pull Request。
 
 ## 🙏 致谢
@@ -308,6 +319,6 @@ Copyright © 2026 YYchainsAw.
 ---
 
 <div align="center">
-  <strong>Small on screen. Fast in flow.</strong><br>
+  <strong>Git 随叫随到，保持工作流。</strong><br>
   如果 RepoPuck 对你有帮助，欢迎点亮 ⭐ Star。
 </div>

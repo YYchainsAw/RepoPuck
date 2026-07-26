@@ -1,4 +1,7 @@
-# RepoPuck design QA
+# RepoPuck v0.1.2 design QA archive
+
+This record is retained as historical evidence. The current design QA record is
+[`docs/design-qa.md`](../design-qa.md).
 
 ## Comparison target
 
