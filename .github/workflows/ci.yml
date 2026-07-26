@@ -196,10 +196,32 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Upload MSI artifact
+      - name: Prepare Windows release-candidate assets
+        id: release_assets
+        shell: pwsh
+        env:
+          BUILT_MSI_PATH: ${{ steps.msi_bundle.outputs.msi_path }}
+        run: |
+          $version = (
+            Get-Content -LiteralPath "src-tauri/tauri.conf.json" -Raw |
+              ConvertFrom-Json
+          ).version
+          & ".github/scripts/New-ReleaseAssets.ps1" `
+            -MsiPath $env:BUILT_MSI_PATH `
+            -PortableExePath "src-tauri/target/release/repopuck.exe" `
+            -Version $version `
+            -OutputDirectory (Join-Path $env:RUNNER_TEMP "release-assets") `
+            -Repository $env:GITHUB_REPOSITORY `
+            -ReleaseTag "v$version"
+
+      - name: Upload Windows release-candidate artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: repopuck-msi-${{ github.sha }}
-          path: ${{ steps.msi_bundle.outputs.msi_path }}
+          name: repopuck-windows-release-candidate-${{ github.sha }}
+          path: |
+            ${{ steps.release_assets.outputs.msi_path }}
+            ${{ steps.release_assets.outputs.portable_zip_path }}
+            ${{ steps.release_assets.outputs.winget_manifest_zip_path }}
+            ${{ steps.release_assets.outputs.checksum_path }}
           if-no-files-found: error
           retention-days: 7
