@@ -60,6 +60,7 @@ describe("createGitClient", () => {
 
     await client.selectRepository("C:\\Projects\\repo");
     await client.getSnapshot();
+    await client.getRefreshToken?.();
     await client.stage(["src/App.tsx"]);
     await client.unstage(["src/App.tsx"]);
     await client.commit("Commit only");
@@ -80,12 +81,14 @@ describe("createGitClient", () => {
     await client.fetch();
     await client.pull();
     await client.stash();
+    await client.cancelOperation();
     await client.openTerminal();
     await client.openExplorer();
 
     expect(vi.mocked(invoke).mock.calls).toEqual([
       ["select_repository", { path: "C:\\Projects\\repo" }],
       ["get_snapshot"],
+      ["get_refresh_token"],
       ["set_staged", { paths: ["src/App.tsx"], staged: true }],
       ["set_staged", { paths: ["src/App.tsx"], staged: false }],
       ["commit", { message: "Commit only" }],
@@ -111,6 +114,7 @@ describe("createGitClient", () => {
       ["fetch"],
       ["pull"],
       ["stash"],
+      ["cancel_git_operation"],
       ["open_terminal"],
       ["open_explorer"],
     ]);

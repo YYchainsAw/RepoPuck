@@ -4,6 +4,10 @@ use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
     process::{Command, ExitStatus, Stdio},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -21,6 +25,22 @@ type WriterHandle = thread::JoinHandle<io::Result<()>>;
 #[derive(Clone, Debug)]
 pub struct GitRunner {
     repository: PathBuf,
+    cancellation: Option<GitCancellation>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct GitCancellation {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl GitCancellation {
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -32,6 +52,14 @@ impl GitRunner {
     pub fn new(repository: impl Into<PathBuf>) -> Self {
         Self {
             repository: repository.into(),
+            cancellation: None,
+        }
+    }
+
+    pub fn with_cancellation(&self, cancellation: GitCancellation) -> Self {
+        Self {
+            repository: self.repository.clone(),
+            cancellation: Some(cancellation),
         }
     }
 
@@ -120,6 +148,13 @@ impl GitRunner {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
+        if self
+            .cancellation
+            .as_ref()
+            .is_some_and(GitCancellation::is_cancelled)
+        {
+            return Err(GitError::cancelled());
+        }
         let args = args
             .into_iter()
             .map(|argument| argument.as_ref().to_os_string())
@@ -165,6 +200,21 @@ impl GitRunner {
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break status,
+                Ok(None)
+                    if self
+                        .cancellation
+                        .as_ref()
+                        .is_some_and(GitCancellation::is_cancelled) =>
+                {
+                    stop_and_reap(
+                        &process_group,
+                        child,
+                        stdin_writer,
+                        stdout_reader,
+                        stderr_reader,
+                    );
+                    return Err(GitError::cancelled());
+                }
                 Ok(None) if Instant::now() < deadline => {
                     thread::sleep(Duration::from_millis(10));
                 }
@@ -190,20 +240,34 @@ impl GitRunner {
                 }
             }
         };
-        if !io_finished_before(
+        match wait_for_io(
             stdin_writer.as_ref(),
             &stdout_reader,
             &stderr_reader,
+            self.cancellation.as_ref(),
             deadline,
         ) {
-            stop_and_reap(
-                &process_group,
-                child,
-                stdin_writer,
-                stdout_reader,
-                stderr_reader,
-            );
-            return Err(GitError::timed_out());
+            IoWaitOutcome::Finished => {}
+            IoWaitOutcome::Cancelled => {
+                stop_and_reap(
+                    &process_group,
+                    child,
+                    stdin_writer,
+                    stdout_reader,
+                    stderr_reader,
+                );
+                return Err(GitError::cancelled());
+            }
+            IoWaitOutcome::TimedOut => {
+                stop_and_reap(
+                    &process_group,
+                    child,
+                    stdin_writer,
+                    stdout_reader,
+                    stderr_reader,
+                );
+                return Err(GitError::timed_out());
+            }
         }
         if let Some(writer) = stdin_writer {
             writer
@@ -261,22 +325,33 @@ fn join_reader(reader: ReaderHandle) -> Result<(Vec<u8>, bool), GitError> {
         .map_err(|_| GitError::safe("Git process output could not be read"))
 }
 
-fn io_finished_before(
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IoWaitOutcome {
+    Finished,
+    Cancelled,
+    TimedOut,
+}
+
+fn wait_for_io(
     stdin_writer: Option<&WriterHandle>,
     stdout_reader: &ReaderHandle,
     stderr_reader: &ReaderHandle,
+    cancellation: Option<&GitCancellation>,
     deadline: Instant,
-) -> bool {
+) -> IoWaitOutcome {
     while stdin_writer.is_some_and(|writer| !writer.is_finished())
         || !stdout_reader.is_finished()
         || !stderr_reader.is_finished()
     {
+        if cancellation.is_some_and(GitCancellation::is_cancelled) {
+            return IoWaitOutcome::Cancelled;
+        }
         if Instant::now() >= deadline {
-            return false;
+            return IoWaitOutcome::TimedOut;
         }
         thread::sleep(Duration::from_millis(10));
     }
-    true
+    IoWaitOutcome::Finished
 }
 
 fn stop_and_reap(
@@ -332,6 +407,10 @@ impl GitError {
 
     fn timed_out() -> Self {
         Self::safe("Git operation timed out and was stopped")
+    }
+
+    fn cancelled() -> Self {
+        Self::safe("Git operation was cancelled")
     }
 
     fn output_limit() -> Self {
@@ -523,11 +602,16 @@ fn sanitize_scp_remote(value: &str) -> Option<String> {
 mod tests {
     use std::ffi::OsString;
     use std::io::Cursor;
-    use std::{thread, time::Duration};
+    use std::{
+        sync::mpsc,
+        thread,
+        time::{Duration, Instant},
+    };
 
     use super::{
-        io_finished_before, read_limited, sanitize_remote_url, timeout_for_args, GitError,
-        GIT_MUTATION_TIMEOUT, GIT_NETWORK_TIMEOUT, GIT_READ_TIMEOUT, MAX_OUTPUT_BYTES,
+        read_limited, sanitize_remote_url, timeout_for_args, wait_for_io, GitCancellation,
+        GitError, GitRunner, IoWaitOutcome, GIT_MUTATION_TIMEOUT, GIT_NETWORK_TIMEOUT,
+        GIT_READ_TIMEOUT, MAX_OUTPUT_BYTES,
     };
 
     #[test]
@@ -547,12 +631,86 @@ mod tests {
             Ok((Vec::new(), false))
         });
 
-        assert!(!io_finished_before(
-            None,
-            &stdout_reader,
-            &stderr_reader,
-            std::time::Instant::now() + Duration::from_millis(5)
-        ));
+        assert_eq!(
+            wait_for_io(
+                None,
+                &stdout_reader,
+                &stderr_reader,
+                None,
+                Instant::now() + Duration::from_millis(5)
+            ),
+            IoWaitOutcome::TimedOut
+        );
+    }
+
+    #[test]
+    fn reader_wait_observes_cancellation_after_the_root_process_exits() {
+        let (release_tx, release_rx) = mpsc::channel();
+        let stdout_reader = thread::spawn(move || {
+            release_rx
+                .recv()
+                .expect("release descendant-held output pipe");
+            Ok((Vec::new(), false))
+        });
+        let stderr_reader = thread::spawn(|| Ok((Vec::new(), false)));
+        let cancellation = GitCancellation::default();
+        let cancellation_request = cancellation.clone();
+        let requester = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(20));
+            cancellation_request.cancel();
+        });
+
+        assert_eq!(
+            wait_for_io(
+                None,
+                &stdout_reader,
+                &stderr_reader,
+                Some(&cancellation),
+                Instant::now() + Duration::from_secs(5)
+            ),
+            IoWaitOutcome::Cancelled
+        );
+
+        release_tx
+            .send(())
+            .expect("release descendant-held output pipe");
+        requester.join().expect("cancellation requester");
+        stdout_reader
+            .join()
+            .expect("stdout reader")
+            .expect("stdout");
+        stderr_reader
+            .join()
+            .expect("stderr reader")
+            .expect("stderr");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn cancelling_after_git_exits_terminates_a_descendant_holding_the_output_pipe() {
+        let cancellation = GitCancellation::default();
+        let runner =
+            GitRunner::new(env!("CARGO_MANIFEST_DIR")).with_cancellation(cancellation.clone());
+        let (result_tx, result_rx) = mpsc::channel();
+        thread::spawn(move || {
+            let result = runner.run(["-c", "alias.repopuckhold=!sleep 8 &", "repopuckhold"]);
+            let _ = result_tx.send(result);
+        });
+
+        // The Git-for-Windows shell exits immediately after launching the background
+        // descendant, while that descendant retains the inherited output pipe.
+        thread::sleep(Duration::from_millis(500));
+        let cancelled_at = Instant::now();
+        cancellation.cancel();
+        let result = result_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("cancellation should terminate the descendant-held pipe promptly");
+
+        assert_eq!(
+            result.expect_err("cancelled runner should fail").message(),
+            "Git operation was cancelled"
+        );
+        assert!(cancelled_at.elapsed() < Duration::from_secs(2));
     }
 
     #[test]
@@ -565,6 +723,19 @@ mod tests {
         assert_eq!(timeout_for_args(&args("push")), GIT_NETWORK_TIMEOUT);
         assert_eq!(timeout_for_args(&args("fetch")), GIT_NETWORK_TIMEOUT);
         assert_eq!(timeout_for_args(&args("pull")), GIT_NETWORK_TIMEOUT);
+    }
+
+    #[test]
+    fn cancelled_runner_stops_before_starting_git() {
+        let cancellation = GitCancellation::default();
+        cancellation.cancel();
+        let runner = GitRunner::new(std::env::temp_dir()).with_cancellation(cancellation);
+
+        let error = runner
+            .run(["status"])
+            .expect_err("cancelled runner should not start Git");
+
+        assert_eq!(error.message(), "Git operation was cancelled");
     }
 
     #[test]

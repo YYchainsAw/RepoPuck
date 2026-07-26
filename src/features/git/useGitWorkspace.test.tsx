@@ -5,6 +5,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GitProvider } from "./GitProvider";
 import type {
+  CommitAndPushResult,
   GenerateCommitMessageResult,
   GitClient,
   OperationResult,
@@ -49,6 +50,14 @@ function cloneSnapshot(snapshot: RepositorySnapshot): RepositorySnapshot {
 function createTestClient() {
   const snapshot = cloneSnapshot(initialSnapshot);
   const success = async (): Promise<OperationResult> => ({ success: true });
+  const commitAndPushSuccess =
+    async (): Promise<CommitAndPushResult> => ({
+      success: true,
+      committed: true,
+      pushed: true,
+      stage: "complete",
+      message: "Changes committed and pushed",
+    });
 
   const client = {
     selectRepository: vi.fn(success),
@@ -75,13 +84,14 @@ function createTestClient() {
     ),
     amendLastCommit: vi.fn(success),
     push: vi.fn(success),
-    commitAndPush: vi.fn(success),
+    commitAndPush: vi.fn(commitAndPushSuccess),
     checkout: vi.fn(success),
     switchBranch: vi.fn(success),
     createBranch: vi.fn(success),
     fetch: vi.fn(success),
     pull: vi.fn(success),
     stash: vi.fn(success),
+    cancelOperation: vi.fn(success),
     openTerminal: vi.fn(success),
     openExplorer: vi.fn(success),
   } satisfies GitClient;
@@ -484,7 +494,7 @@ describe("useGitWorkspace", () => {
     expect(result.current.error).toBe("Native bridge unavailable");
   });
 
-  it("refreshes partial commit-and-push failure without clearing its message or error", async () => {
+  it("clears the submitted draft and refreshes after commit succeeds but push fails", async () => {
     const client = createTestClient();
     const committedSnapshot = {
       ...cloneSnapshot(initialSnapshot),
@@ -496,7 +506,10 @@ describe("useGitWorkspace", () => {
       .mockResolvedValueOnce(committedSnapshot);
     client.commitAndPush.mockResolvedValueOnce({
       success: false,
-      message: "Push failed after commit",
+      committed: true,
+      pushed: false,
+      stage: "push",
+      message: "Git authentication failed",
     });
     const { result } = renderHook(() => useGitWorkspace(), {
       wrapper: createWrapper(client),
@@ -510,8 +523,40 @@ describe("useGitWorkspace", () => {
 
     expect(client.getSnapshot).toHaveBeenCalledTimes(2);
     expect(result.current.snapshot).toEqual(committedSnapshot);
-    expect(result.current.commitMessage).toBe("Commit before push");
-    expect(result.current.error).toBe("Push failed after commit");
+    expect(result.current.snapshot?.changes).toEqual([]);
+    expect(result.current.commitMessage).toBe("");
+    expect(result.current.error).toBe(
+      "Commit succeeded, but Push failed. You can retry Push. Git authentication failed",
+    );
+
+    await act(async () => {
+      await result.current.push();
+    });
+    expect(client.commitAndPush).toHaveBeenCalledTimes(1);
+    expect(client.push).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the submitted draft when commit fails before push starts", async () => {
+    const client = createTestClient();
+    client.commitAndPush.mockResolvedValueOnce({
+      success: false,
+      committed: false,
+      pushed: false,
+      stage: "commit",
+      message: "Nothing staged to commit",
+    });
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    act(() => result.current.setCommitMessage("Retry this commit"));
+    await act(async () => {
+      await result.current.commitAndPush();
+    });
+
+    expect(result.current.commitMessage).toBe("Retry this commit");
+    expect(result.current.error).toBe("Nothing staged to commit");
   });
 
   it("automatically refreshes after a successful mutation", async () => {
@@ -577,6 +622,55 @@ describe("useGitWorkspace", () => {
     expect(result.current.busyAction).toBeNull();
   });
 
+  it("cancels an active Fetch without treating the cancellation as an error", async () => {
+    const client = createTestClient();
+    let finishFetch!: (result: OperationResult) => void;
+    let finishCancellation!: (result: OperationResult) => void;
+    client.fetch.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishFetch = resolve;
+        }),
+    );
+    client.cancelOperation.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishCancellation = resolve;
+        }),
+    );
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    let fetchPromise!: Promise<boolean>;
+    act(() => {
+      fetchPromise = result.current.fetch();
+    });
+    await waitFor(() => expect(result.current.busyAction).toBe("fetch"));
+
+    let cancelPromise!: Promise<boolean>;
+    act(() => {
+      cancelPromise = result.current.cancelOperation();
+    });
+    await waitFor(() => expect(result.current.cancellingOperation).toBe(true));
+    expect(client.cancelOperation).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      finishCancellation({ success: true, message: "Cancellation requested" });
+      expect(await cancelPromise).toBe(true);
+    });
+    await act(async () => {
+      finishFetch({ success: false, message: "Git operation was cancelled" });
+      expect(await fetchPromise).toBe(false);
+    });
+
+    expect(result.current.busyAction).toBeNull();
+    expect(result.current.cancellingOperation).toBe(false);
+    expect(result.current.error).toBeNull();
+    expect(result.current.notice).toBe("Git operation was cancelled");
+  });
+
   it("refreshes at the configured interval while visible and cleans up its timer", async () => {
     vi.useFakeTimers();
     const client = createTestClient();
@@ -599,6 +693,40 @@ describe("useGitWorkspace", () => {
 
     unmount();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("uses a lightweight token before rebuilding an unchanged full snapshot", async () => {
+    vi.useFakeTimers();
+    const baseClient = createTestClient();
+    const getRefreshToken = vi.fn(async () => "state-1");
+    const client: GitClient = { ...baseClient, getRefreshToken };
+    const { result, unmount } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client, true, 10_000),
+    });
+
+    await act(async () => Promise.resolve());
+    expect(result.current.snapshot).toEqual(initialSnapshot);
+    expect(baseClient.getSnapshot).toHaveBeenCalledTimes(1);
+    expect(getRefreshToken).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(getRefreshToken).toHaveBeenCalledTimes(2);
+    expect(baseClient.getSnapshot).toHaveBeenCalledTimes(1);
+
+    getRefreshToken.mockResolvedValue("state-2");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(baseClient.getSnapshot).toHaveBeenCalledTimes(2);
+
+    getRefreshToken.mockResolvedValue("state-2");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(baseClient.getSnapshot.mock.calls.length).toBeGreaterThanOrEqual(3);
+    unmount();
   });
 
   it("does not load or poll while initially hidden", async () => {

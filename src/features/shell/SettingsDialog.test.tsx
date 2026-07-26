@@ -351,6 +351,7 @@ it("stores, replaces, and removes the API key without ever revealing it", async 
   fireEvent.click(screen.getByRole("button", { name: "Save key" }));
   await waitFor(() =>
     expect(invokeMock).toHaveBeenCalledWith("save_ai_api_key", {
+      baseUrl: "https://api.openai.com/v1",
       apiKey: "sk-replacement",
     }),
   );
@@ -358,7 +359,9 @@ it("stores, replaces, and removes the API key without ever revealing it", async 
 
   fireEvent.click(screen.getByRole("button", { name: "Remove" }));
   await waitFor(() =>
-    expect(invokeMock).toHaveBeenCalledWith("delete_ai_api_key"),
+    expect(invokeMock).toHaveBeenCalledWith("delete_ai_api_key", {
+      baseUrl: "https://api.openai.com/v1",
+    }),
   );
   expect(screen.getByText("No API key saved yet.")).toBeInTheDocument();
 });
@@ -471,6 +474,120 @@ it("keeps the saved-key state when replacing a key fails", async () => {
   );
   expect(screen.getByRole("button", { name: "Remove" })).toBeEnabled();
   expect(screen.getByLabelText("AI API key")).toHaveValue("sk-invalid-replacement");
+});
+
+it("requires an explicit key choice after the AI provider host changes", async () => {
+  Object.defineProperty(window, "__TAURI_INTERNALS__", {
+    configurable: true,
+    value: {},
+  });
+  invokeMock.mockImplementation(async (command: string, arguments_: unknown) => {
+    if (command === "get_ai_context_summary") {
+      return {
+        includedFiles: 2,
+        approximateBytes: 2048,
+        binaryFiles: 0,
+        truncated: false,
+        excludedFiles: [],
+      };
+    }
+    if (command === "get_ai_key_status") {
+      const { baseUrl } = arguments_ as { baseUrl: string };
+      return baseUrl.includes("example.com")
+        ? {
+            configured: false,
+            legacyConfigured: false,
+            providerHost: "api.example.com",
+          }
+        : {
+            configured: true,
+            legacyConfigured: false,
+            providerHost: "api.openai.com",
+          };
+    }
+    return { success: true };
+  });
+  render(
+    <ShellSettingsProvider
+      initialSettings={{ theme: "light", pinned: false, recentRepositories: [] }}
+    >
+      <Harness />
+    </ShellSettingsProvider>,
+  );
+
+  await waitFor(() =>
+    expect(screen.getByText(/saved securely for api\.openai\.com/i)).toBeInTheDocument(),
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "AI service base URL" }), {
+    target: { value: "https://api.example.com/v1" },
+  });
+
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Provider changed to api.example.com",
+    ),
+  );
+  expect(screen.getByText(/No API key is saved for api\.example\.com/i)).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("AI API key"), {
+    target: { value: "sk-example" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save key" }));
+  await waitFor(() =>
+    expect(invokeMock).toHaveBeenCalledWith("save_ai_api_key", {
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-example",
+    }),
+  );
+});
+
+it("only migrates a legacy key after confirmation and previews staged context", async () => {
+  Object.defineProperty(window, "__TAURI_INTERNALS__", {
+    configurable: true,
+    value: {},
+  });
+  invokeMock.mockImplementation(async (command: string) => {
+    if (command === "get_ai_context_summary") {
+      return {
+        includedFiles: 3,
+        approximateBytes: 1536,
+        binaryFiles: 1,
+        truncated: true,
+        excludedFiles: [".env"],
+      };
+    }
+    if (command === "get_ai_key_status") {
+      return {
+        configured: false,
+        legacyConfigured: true,
+        providerHost: "api.openai.com",
+      };
+    }
+    return { success: true };
+  });
+  render(
+    <ShellSettingsProvider
+      initialSettings={{ theme: "light", pinned: false, recentRepositories: [] }}
+    >
+      <Harness />
+    </ShellSettingsProvider>,
+  );
+
+  expect(await screen.findByText(/3 staged files · approximately 1\.5 KB/i)).toBeInTheDocument();
+  expect(screen.getByText(/1 binary file has content omitted/i)).toBeInTheDocument();
+  expect(screen.getByText(/1 sensitive file is excluded/i)).toBeInTheDocument();
+  expect(screen.getByText(/context is truncated/i)).toBeInTheDocument();
+  expect(invokeMock).not.toHaveBeenCalledWith(
+    "migrate_legacy_ai_api_key",
+    expect.anything(),
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Confirm existing key" }));
+  await waitFor(() =>
+    expect(invokeMock).toHaveBeenCalledWith("migrate_legacy_ai_api_key", {
+      baseUrl: "https://api.openai.com/v1",
+    }),
+  );
 });
 
 it("discloses exactly what is sent when generating a message", () => {

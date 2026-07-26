@@ -27,6 +27,15 @@ export interface OperationResult {
   message?: string;
 }
 
+export type CommitAndPushStage = "commit" | "push" | "complete";
+
+export interface CommitAndPushResult extends OperationResult {
+  committed: boolean;
+  pushed: boolean;
+  stage: CommitAndPushStage;
+  message: string;
+}
+
 export type AiCommitLanguage = "zh-CN" | "en";
 
 export type ConventionalCommitType =
@@ -76,6 +85,7 @@ export interface RepositorySnapshot {
 export interface GitClient {
   selectRepository(path: string): Promise<OperationResult>;
   getSnapshot(): Promise<RepositorySnapshot>;
+  getRefreshToken?(): Promise<string>;
   stage(paths: string[]): Promise<OperationResult>;
   unstage(paths: string[]): Promise<OperationResult>;
   commit(message: string): Promise<OperationResult>;
@@ -84,13 +94,14 @@ export interface GitClient {
   ): Promise<GenerateCommitMessageResult>;
   amendLastCommit(message?: string): Promise<OperationResult>;
   push(): Promise<OperationResult>;
-  commitAndPush(message: string): Promise<OperationResult>;
+  commitAndPush(message: string): Promise<CommitAndPushResult>;
   checkout(branch: string): Promise<OperationResult>;
   switchBranch(branch: string): Promise<OperationResult>;
   createBranch(branch: string): Promise<OperationResult>;
   fetch(): Promise<OperationResult>;
   pull(): Promise<OperationResult>;
   stash(): Promise<OperationResult>;
+  cancelOperation(): Promise<OperationResult>;
   openTerminal(): Promise<OperationResult>;
   openExplorer(): Promise<OperationResult>;
 }

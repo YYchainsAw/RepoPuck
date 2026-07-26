@@ -32,9 +32,23 @@ export function PanelShell() {
   const [createBranchOpen, setCreateBranchOpen] = useState(false);
   const [amendOpen, setAmendOpen] = useState(false);
   const [branchName, setBranchName] = useState("");
+  const [busyElapsedSeconds, setBusyElapsedSeconds] = useState(0);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const busy = workspace.busyAction !== null;
   const closeActionMenu = useCallback(() => setMenuOpen(false), []);
+
+  useEffect(() => {
+    if (!workspace.busyAction) {
+      setBusyElapsedSeconds(0);
+      return;
+    }
+    const startedAt = Date.now();
+    setBusyElapsedSeconds(0);
+    const timer = window.setInterval(() => {
+      setBusyElapsedSeconds(Math.floor((Date.now() - startedAt) / 1_000));
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [workspace.busyAction]);
 
   useEffect(() => {
     const closeMenus = (event: KeyboardEvent) => {
@@ -105,6 +119,18 @@ export function PanelShell() {
         <div className="busy-status" aria-live="polite">
           <Spinner size="small" />
           <span>{copy.panel.busy[workspace.busyAction]}</span>
+          {busyElapsedSeconds > 0 && (
+            <span className="busy-elapsed">{busyElapsedSeconds}s</span>
+          )}
+          {workspace.busyAction === "fetch" && (
+            <Button
+              size="small"
+              disabled={workspace.cancellingOperation}
+              onClick={() => void workspace.cancelOperation()}
+            >
+              {copy.panel.cancel}
+            </Button>
+          )}
         </div>
       )}
       {workspace.generatingCommitMessage && (

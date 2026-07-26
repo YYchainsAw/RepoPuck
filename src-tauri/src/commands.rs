@@ -10,19 +10,33 @@ use std::{
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, WebviewWindow};
 use tauri_plugin_store::StoreExt;
 
 use crate::git::{
-    model::{OperationResult, RepositorySnapshot},
-    runner::GitError,
+    model::{CommitAndPushResult, OperationResult, RepositorySnapshot},
+    runner::{GitCancellation, GitError},
     service::GitService,
 };
 
 #[derive(Default)]
 pub struct RepositoryState {
     service: Mutex<Option<GitService>>,
+    mutation: Mutex<()>,
+    active_cancellation: Mutex<Option<GitCancellation>>,
     selection_intent: AtomicU64,
+}
+
+struct ActiveCancellationGuard<'a> {
+    slot: &'a Mutex<Option<GitCancellation>>,
+}
+
+impl Drop for ActiveCancellationGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut active) = self.slot.lock() {
+            *active = None;
+        }
+    }
 }
 
 impl RepositoryState {
@@ -97,14 +111,59 @@ impl RepositoryState {
         &self,
         operation: impl FnOnce(&GitService) -> Result<T, GitError>,
     ) -> Result<T, String> {
-        let selected = self
+        let service = self
             .service
             .lock()
-            .map_err(|_| "Repository state is unavailable".to_owned())?;
-        let service = selected
+            .map_err(|_| "Repository state is unavailable".to_owned())?
             .as_ref()
+            .cloned()
             .ok_or_else(|| "No repository is selected".to_owned())?;
-        operation(service).map_err(error_message)
+        operation(&service).map_err(error_message)
+    }
+
+    pub(crate) fn with_mutation_service<T>(
+        &self,
+        cancellable: bool,
+        operation: impl FnOnce(&GitService) -> Result<T, GitError>,
+    ) -> Result<T, String> {
+        let _mutation = self
+            .mutation
+            .lock()
+            .map_err(|_| "Git mutation state is unavailable".to_owned())?;
+        let service = self
+            .service
+            .lock()
+            .map_err(|_| "Repository state is unavailable".to_owned())?
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "No repository is selected".to_owned())?;
+        let cancellation = cancellable.then(GitCancellation::default);
+        if let Some(token) = cancellation.as_ref() {
+            *self
+                .active_cancellation
+                .lock()
+                .map_err(|_| "Git cancellation state is unavailable".to_owned())? =
+                Some(token.clone());
+        }
+        let _active_guard = cancellation.as_ref().map(|_| ActiveCancellationGuard {
+            slot: &self.active_cancellation,
+        });
+        let service = cancellation
+            .map(|token| service.with_cancellation(token))
+            .unwrap_or(service);
+        operation(&service).map_err(error_message)
+    }
+
+    pub(crate) fn cancel_active_operation(&self) -> Result<bool, String> {
+        let active = self
+            .active_cancellation
+            .lock()
+            .map_err(|_| "Git cancellation state is unavailable".to_owned())?;
+        let Some(cancellation) = active.as_ref() else {
+            return Ok(false);
+        };
+        cancellation.cancel();
+        Ok(true)
     }
 
     pub(crate) fn selected_path(&self) -> Result<PathBuf, String> {
@@ -131,7 +190,14 @@ impl RepositoryState {
 }
 
 #[tauri::command]
-pub async fn select_repository(path: String, app: AppHandle) -> OperationResult {
+pub async fn select_repository(
+    path: String,
+    app: AppHandle,
+    window: WebviewWindow,
+) -> OperationResult {
+    if let Err(message) = require_panel(&window) {
+        return OperationResult::failure(message);
+    }
     let selected = PathBuf::from(path);
     let intent = app.state::<RepositoryState>().reserve_selection();
     let persistence_app = app.clone();
@@ -157,7 +223,11 @@ pub async fn select_repository(path: String, app: AppHandle) -> OperationResult 
 }
 
 #[tauri::command]
-pub async fn get_snapshot(app: AppHandle) -> Result<RepositorySnapshot, String> {
+pub async fn get_snapshot(
+    app: AppHandle,
+    window: WebviewWindow,
+) -> Result<RepositorySnapshot, String> {
+    require_panel(&window)?;
     with_repository(app, |state| state.with_service(GitService::snapshot)).await
 }
 
@@ -167,7 +237,21 @@ pub async fn get_change_count(app: AppHandle) -> Result<usize, String> {
 }
 
 #[tauri::command]
-pub async fn set_staged(paths: Vec<String>, staged: bool, app: AppHandle) -> OperationResult {
+pub async fn get_refresh_token(app: AppHandle, window: WebviewWindow) -> Result<String, String> {
+    require_panel(&window)?;
+    with_repository(app, |state| state.with_service(GitService::refresh_token)).await
+}
+
+#[tauri::command]
+pub async fn set_staged(
+    paths: Vec<String>,
+    staged: bool,
+    app: AppHandle,
+    window: WebviewWindow,
+) -> OperationResult {
+    if let Err(message) = require_panel(&window) {
+        return OperationResult::failure(message);
+    }
     operate_blocking(
         app,
         move |service| service.set_staged(&paths, staged),
@@ -177,7 +261,10 @@ pub async fn set_staged(paths: Vec<String>, staged: bool, app: AppHandle) -> Ope
 }
 
 #[tauri::command]
-pub async fn commit(message: String, app: AppHandle) -> OperationResult {
+pub async fn commit(message: String, app: AppHandle, window: WebviewWindow) -> OperationResult {
+    if let Err(message) = require_panel(&window) {
+        return OperationResult::failure(message);
+    }
     operate_blocking(
         app,
         move |service| service.commit(&message),
@@ -187,7 +274,14 @@ pub async fn commit(message: String, app: AppHandle) -> OperationResult {
 }
 
 #[tauri::command]
-pub async fn amend_last_commit(message: Option<String>, app: AppHandle) -> OperationResult {
+pub async fn amend_last_commit(
+    message: Option<String>,
+    app: AppHandle,
+    window: WebviewWindow,
+) -> OperationResult {
+    if let Err(message) = require_panel(&window) {
+        return OperationResult::failure(message);
+    }
     operate_blocking(
         app,
         move |service| service.amend_last_commit(message.as_deref()),
@@ -197,25 +291,60 @@ pub async fn amend_last_commit(message: Option<String>, app: AppHandle) -> Opera
 }
 
 #[tauri::command]
-pub async fn push(app: AppHandle) -> OperationResult {
+pub async fn push(app: AppHandle, window: WebviewWindow) -> OperationResult {
+    if let Err(message) = require_panel(&window) {
+        return OperationResult::failure(message);
+    }
     operate_blocking(app, GitService::push, "Changes pushed").await
 }
 
 #[tauri::command]
-pub async fn commit_and_push(message: String, app: AppHandle) -> OperationResult {
-    operate_blocking(
-        app,
-        move |service| {
-            service.commit(&message)?;
-            service.push()
-        },
-        "Changes committed and pushed",
-    )
+pub async fn commit_and_push(
+    message: String,
+    app: AppHandle,
+    window: WebviewWindow,
+) -> CommitAndPushResult {
+    if let Err(message) = require_panel(&window) {
+        return CommitAndPushResult::commit_failed(message);
+    }
+    match with_repository(app, move |state| {
+        state.with_mutation_service(false, |service| {
+            Ok(execute_commit_and_push(
+                || service.commit(&message),
+                || service.push(),
+            ))
+        })
+    })
     .await
+    {
+        Ok(result) => result,
+        Err(message) => CommitAndPushResult::commit_failed(message),
+    }
+}
+
+fn execute_commit_and_push(
+    commit: impl FnOnce() -> Result<(), GitError>,
+    push: impl FnOnce() -> Result<(), GitError>,
+) -> CommitAndPushResult {
+    if let Err(error) = commit() {
+        return CommitAndPushResult::commit_failed(error.message());
+    }
+
+    match push() {
+        Ok(()) => CommitAndPushResult::complete("Changes committed and pushed"),
+        Err(error) => CommitAndPushResult::push_failed(error.message()),
+    }
 }
 
 #[tauri::command]
-pub async fn switch_branch(branch: String, app: AppHandle) -> OperationResult {
+pub async fn switch_branch(
+    branch: String,
+    app: AppHandle,
+    window: WebviewWindow,
+) -> OperationResult {
+    if let Err(message) = require_panel(&window) {
+        return OperationResult::failure(message);
+    }
     operate_blocking(
         app,
         move |service| service.switch_branch(&branch),
@@ -225,7 +354,14 @@ pub async fn switch_branch(branch: String, app: AppHandle) -> OperationResult {
 }
 
 #[tauri::command]
-pub async fn create_branch(branch: String, app: AppHandle) -> OperationResult {
+pub async fn create_branch(
+    branch: String,
+    app: AppHandle,
+    window: WebviewWindow,
+) -> OperationResult {
+    if let Err(message) = require_panel(&window) {
+        return OperationResult::failure(message);
+    }
     operate_blocking(
         app,
         move |service| service.create_branch(&branch),
@@ -235,22 +371,46 @@ pub async fn create_branch(branch: String, app: AppHandle) -> OperationResult {
 }
 
 #[tauri::command]
-pub async fn fetch(app: AppHandle) -> OperationResult {
-    operate_blocking(app, GitService::fetch, "Fetch complete").await
+pub async fn fetch(app: AppHandle, window: WebviewWindow) -> OperationResult {
+    if let Err(message) = require_panel(&window) {
+        return OperationResult::failure(message);
+    }
+    operate_cancellable(app, GitService::fetch, "Fetch complete").await
 }
 
 #[tauri::command]
-pub async fn pull(app: AppHandle) -> OperationResult {
+pub async fn pull(app: AppHandle, window: WebviewWindow) -> OperationResult {
+    if let Err(message) = require_panel(&window) {
+        return OperationResult::failure(message);
+    }
     operate_blocking(app, GitService::pull, "Pull complete").await
 }
 
 #[tauri::command]
-pub async fn stash(app: AppHandle) -> OperationResult {
+pub async fn stash(app: AppHandle, window: WebviewWindow) -> OperationResult {
+    if let Err(message) = require_panel(&window) {
+        return OperationResult::failure(message);
+    }
     operate_blocking(app, GitService::stash, "Changes stashed").await
 }
 
 #[tauri::command]
-pub async fn open_terminal(app: AppHandle) -> OperationResult {
+pub async fn cancel_git_operation(app: AppHandle, window: WebviewWindow) -> OperationResult {
+    if let Err(message) = require_panel(&window) {
+        return OperationResult::failure(message);
+    }
+    match with_repository(app, |state| state.cancel_active_operation()).await {
+        Ok(true) => OperationResult::success("Cancellation requested"),
+        Ok(false) => OperationResult::failure("No cancellable Git operation is running"),
+        Err(message) => OperationResult::failure(message),
+    }
+}
+
+#[tauri::command]
+pub async fn open_terminal(app: AppHandle, window: WebviewWindow) -> OperationResult {
+    if let Err(message) = require_panel(&window) {
+        return OperationResult::failure(message);
+    }
     match with_repository(app, |state| {
         state.selected_path().and_then(|path| spawn_terminal(&path))
     })
@@ -262,7 +422,10 @@ pub async fn open_terminal(app: AppHandle) -> OperationResult {
 }
 
 #[tauri::command]
-pub async fn open_explorer(app: AppHandle) -> OperationResult {
+pub async fn open_explorer(app: AppHandle, window: WebviewWindow) -> OperationResult {
+    if let Err(message) = require_panel(&window) {
+        return OperationResult::failure(message);
+    }
     match with_repository(app, |state| {
         state.selected_path().and_then(|path| spawn_explorer(&path))
     })
@@ -278,7 +441,28 @@ async fn operate_blocking(
     operation: impl FnOnce(&GitService) -> Result<(), GitError> + Send + 'static,
     success_message: &'static str,
 ) -> OperationResult {
-    match with_repository(app, move |state| state.with_service(operation)).await {
+    operate(app, operation, success_message, false).await
+}
+
+async fn operate_cancellable(
+    app: AppHandle,
+    operation: impl FnOnce(&GitService) -> Result<(), GitError> + Send + 'static,
+    success_message: &'static str,
+) -> OperationResult {
+    operate(app, operation, success_message, true).await
+}
+
+async fn operate(
+    app: AppHandle,
+    operation: impl FnOnce(&GitService) -> Result<(), GitError> + Send + 'static,
+    success_message: &'static str,
+    cancellable: bool,
+) -> OperationResult {
+    match with_repository(app, move |state| {
+        state.with_mutation_service(cancellable, operation)
+    })
+    .await
+    {
         Ok(()) => OperationResult::success(success_message),
         Err(message) => OperationResult::failure(message),
     }
@@ -297,6 +481,18 @@ where
     })
     .await
     .map_err(|_| "Git operation could not be scheduled".to_owned())?
+}
+
+pub(crate) fn require_panel(window: &WebviewWindow) -> Result<(), String> {
+    if panel_label_allowed(window.label()) {
+        Ok(())
+    } else {
+        Err("This action is available from the RepoPuck panel only".to_owned())
+    }
+}
+
+fn panel_label_allowed(label: &str) -> bool {
+    label == crate::windowing::PANEL_LABEL
 }
 
 fn error_message(error: GitError) -> String {
@@ -359,11 +555,18 @@ mod tests {
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
-    use super::RepositoryState;
-    use crate::git::service::GitService;
-    use std::sync::TryLockError;
+    use super::{execute_commit_and_push, panel_label_allowed, RepositoryState};
+    use crate::git::{model::CommitAndPushStage, runner::GitError, service::GitService};
+    use std::cell::Cell;
 
     static NEXT_REPOSITORY: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn privileged_git_actions_are_limited_to_the_panel_window() {
+        assert!(panel_label_allowed("panel"));
+        assert!(!panel_label_allowed("puck"));
+        assert!(!panel_label_allowed("main"));
+    }
 
     struct TestRepository(PathBuf);
 
@@ -398,7 +601,7 @@ mod tests {
     }
 
     #[test]
-    fn repository_session_serializes_complete_operations() {
+    fn mutation_session_serializes_mutations_without_blocking_reads_or_selection() {
         let repository = TestRepository::new();
         let state = Arc::new(RepositoryState::default());
         state
@@ -408,22 +611,34 @@ mod tests {
         let (release_tx, release_rx) = mpsc::channel();
         let first_state = Arc::clone(&state);
         let first = thread::spawn(move || {
-            first_state.with_service(|_| {
+            first_state.with_mutation_service(false, |_| {
                 first_entered_tx.send(()).expect("signal first entered");
                 release_rx.recv().expect("release first operation");
                 Ok(())
             })
         });
         first_entered_rx.recv().expect("first operation entered");
-        assert!(matches!(
-            state.service.try_lock(),
-            Err(TryLockError::WouldBlock)
-        ));
+
+        let (read_entered_tx, read_entered_rx) = mpsc::channel();
+        let reading_state = Arc::clone(&state);
+        let reading = thread::spawn(move || {
+            reading_state.with_service(|_| {
+                read_entered_tx.send(()).expect("signal read entered");
+                Ok(())
+            })
+        });
+        read_entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("read entered while mutation was running");
+        reading
+            .join()
+            .expect("read thread")
+            .expect("read operation");
 
         let (second_entered_tx, second_entered_rx) = mpsc::channel();
         let second_state = Arc::clone(&state);
         let second = thread::spawn(move || {
-            second_state.with_service(|_| {
+            second_state.with_mutation_service(false, |_| {
                 second_entered_tx.send(()).expect("signal second entered");
                 Ok(())
             })
@@ -444,10 +659,11 @@ mod tests {
             second_entered_rx.recv_timeout(Duration::from_millis(150)),
             Err(mpsc::RecvTimeoutError::Timeout)
         ));
-        assert!(matches!(
-            selection_done_rx.recv_timeout(Duration::from_millis(150)),
-            Err(mpsc::RecvTimeoutError::Timeout)
-        ));
+        selection_done_rx
+            .recv_timeout(Duration::from_secs(15))
+            .expect("selection finished while mutation was running")
+            .expect("select replacement repository");
+        selecting.join().expect("selection thread");
         release_tx.send(()).expect("release first operation");
         first
             .join()
@@ -463,11 +679,42 @@ mod tests {
             .join()
             .expect("second thread")
             .expect("second operation");
-        selection_done_rx
-            .recv_timeout(completion_timeout)
-            .expect("selection finished after release")
-            .expect("select replacement repository");
-        selecting.join().expect("selection thread");
+    }
+
+    #[test]
+    fn cancellable_mutation_can_be_stopped_without_poisoning_the_next_operation() {
+        let repository = TestRepository::new();
+        let state = Arc::new(RepositoryState::default());
+        state
+            .select(repository.0.clone())
+            .expect("select repository");
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (continue_tx, continue_rx) = mpsc::channel();
+        let operation_state = Arc::clone(&state);
+        let operation = thread::spawn(move || {
+            operation_state.with_mutation_service(true, |service| {
+                entered_tx.send(()).expect("signal cancellable operation");
+                continue_rx.recv().expect("continue cancellable operation");
+                service.change_count().map(|_| ())
+            })
+        });
+
+        entered_rx.recv().expect("cancellable operation entered");
+        assert!(state
+            .cancel_active_operation()
+            .expect("request cancellation"));
+        continue_tx.send(()).expect("continue after cancellation");
+        let error = operation
+            .join()
+            .expect("cancellable operation thread")
+            .expect_err("operation should observe cancellation");
+        assert_eq!(error, "Git operation was cancelled");
+        assert!(!state
+            .cancel_active_operation()
+            .expect("cancellation state cleared"));
+        state
+            .with_mutation_service(false, |_| Ok(()))
+            .expect("next mutation remains available");
     }
 
     #[test]
@@ -541,5 +788,60 @@ mod tests {
         let newer = state.reserve_selection();
         assert_eq!(newer, 2);
         assert_eq!(state.reserve_selection_if_current(1), None);
+    }
+
+    #[test]
+    fn commit_and_push_stops_before_push_when_commit_fails() {
+        let push_called = Cell::new(false);
+
+        let result = execute_commit_and_push(
+            || Err(GitError::safe("Nothing staged to commit")),
+            || {
+                push_called.set(true);
+                Ok(())
+            },
+        );
+
+        assert!(!result.success);
+        assert!(!result.committed);
+        assert!(!result.pushed);
+        assert_eq!(result.stage, CommitAndPushStage::Commit);
+        assert_eq!(result.message, "Nothing staged to commit");
+        assert!(!push_called.get());
+    }
+
+    #[test]
+    fn commit_and_push_reports_a_completed_commit_when_push_fails() {
+        let result = execute_commit_and_push(
+            || Ok(()),
+            || Err(GitError::safe("Git authentication failed")),
+        );
+
+        assert!(!result.success);
+        assert!(result.committed);
+        assert!(!result.pushed);
+        assert_eq!(result.stage, CommitAndPushStage::Push);
+        assert_eq!(result.message, "Git authentication failed");
+        assert_eq!(
+            serde_json::to_value(&result).expect("serialize partial result"),
+            serde_json::json!({
+                "success": false,
+                "committed": true,
+                "pushed": false,
+                "stage": "push",
+                "message": "Git authentication failed",
+            })
+        );
+    }
+
+    #[test]
+    fn commit_and_push_reports_both_completed_stages() {
+        let result = execute_commit_and_push(|| Ok(()), || Ok(()));
+
+        assert!(result.success);
+        assert!(result.committed);
+        assert!(result.pushed);
+        assert_eq!(result.stage, CommitAndPushStage::Complete);
+        assert_eq!(result.message, "Changes committed and pushed");
     }
 }

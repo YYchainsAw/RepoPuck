@@ -100,6 +100,13 @@ export function createDemoGitClient(): GitClient {
       return { success: true, message: "Repository selected" };
     },
     getSnapshot: async () => structuredClone(snapshot),
+    getRefreshToken: async () =>
+      JSON.stringify({
+        branch: snapshot.currentBranch,
+        ahead: snapshot.ahead,
+        behind: snapshot.behind,
+        changes: snapshot.changes,
+      }),
     stage: (paths) => updateStaged(paths, true),
     unstage: (paths) => updateStaged(paths, false),
     commit,
@@ -131,9 +138,23 @@ export function createDemoGitClient(): GitClient {
     },
     commitAndPush: async (message) => {
       const result = await commit(message);
-      if (!result.success) return result;
+      if (!result.success) {
+        return {
+          success: false,
+          committed: false,
+          pushed: false,
+          stage: "commit",
+          message: result.message ?? "Commit failed",
+        };
+      }
       snapshot.ahead = 0;
-      return { success: true, message: "Committed and pushed" };
+      return {
+        success: true,
+        committed: true,
+        pushed: true,
+        stage: "complete",
+        message: "Committed and pushed",
+      };
     },
     checkout: switchBranch,
     switchBranch,
@@ -160,6 +181,7 @@ export function createDemoGitClient(): GitClient {
       snapshot.changes = [];
       return { success: true, message: "Changes stashed" };
     },
+    cancelOperation: () => success("Cancellation requested"),
     openTerminal: () => success("Opened terminal"),
     openExplorer: () => success("Opened Explorer"),
   };

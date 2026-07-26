@@ -28,6 +28,8 @@ export function createGitClient(options: CreateGitClientOptions = {}): GitClient
 export type {
   BranchSummary,
   ChangeEntry,
+  CommitAndPushResult,
+  CommitAndPushStage,
   GitClient,
   OperationResult,
   RepositorySnapshot,

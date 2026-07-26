@@ -33,6 +33,11 @@ export interface ShellCopy {
     generatedSubject: Readonly<Record<AppLanguage, string>>;
     apiKey: string;
     apiKeyDescription: string;
+    providerKeyScope(provider: string): string;
+    providerChanged(provider: string): string;
+    legacyKeyAvailable(provider: string): string;
+    useSavedKey: string;
+    confirmLegacyKey: string;
     aiApiKey: string;
     replaceKeyPlaceholder: string;
     enterKeyPlaceholder: string;
@@ -41,12 +46,22 @@ export interface ShellCopy {
     remove: string;
     checkingKeyStorage: string;
     keySaved: string;
+    keySavedFor(provider: string): string;
     noKeySaved: string;
+    noKeySavedFor(provider: string): string;
     savingToCredentialManager: string;
     removingKey: string;
     secureStorageDesktopOnly: string;
     privacyTitle: string;
     privacyDescription: string;
+    contextTitle: string;
+    contextDescription: string;
+    contextLoading: string;
+    contextReady(files: number, size: string): string;
+    contextBinaryOmitted(files: number): string;
+    contextExcluded(files: number): string;
+    contextTruncated: string;
+    contextUnavailable: string;
     recentRepositories: string;
     clear: string;
     clearRecentRepositories: string;
@@ -187,6 +202,14 @@ const en: ShellCopy = {
     apiKey: "API key",
     apiKeyDescription:
       "The key is stored in Windows Credential Manager and is never written to settings.json.",
+    providerKeyScope: (provider) =>
+      `Credentials are isolated to ${provider}; changing the provider never reuses this key automatically.`,
+    providerChanged: (provider) =>
+      `Provider changed to ${provider}. Confirm a key already saved for this host or save a new one.`,
+    legacyKeyAvailable: (provider) =>
+      `A key saved by an older RepoPuck version is available. Confirm before assigning it to ${provider}.`,
+    useSavedKey: "Use saved key",
+    confirmLegacyKey: "Confirm existing key",
     aiApiKey: "AI API key",
     replaceKeyPlaceholder: "Enter a new key to replace it",
     enterKeyPlaceholder: "Enter API key",
@@ -195,7 +218,9 @@ const en: ShellCopy = {
     remove: "Remove",
     checkingKeyStorage: "Checking secure key storage…",
     keySaved: "API key saved securely.",
+    keySavedFor: (provider) => `API key saved securely for ${provider}.`,
     noKeySaved: "No API key saved yet.",
+    noKeySavedFor: (provider) => `No API key is saved for ${provider}.`,
     savingToCredentialManager: "Saving to Windows Credential Manager…",
     removingKey: "Removing the saved API key…",
     secureStorageDesktopOnly:
@@ -203,6 +228,17 @@ const en: ShellCopy = {
     privacyTitle: "Privacy:",
     privacyDescription:
       "only when you click AI, staged text differences are sent to the selected AI service. Known sensitive paths and binary contents are excluded, and common secret-looking lines are redacted.",
+    contextTitle: "AI context preview",
+    contextDescription: "This is the staged context RepoPuck will prepare before a request.",
+    contextLoading: "Checking the staged context…",
+    contextReady: (files, size) =>
+      `${files} staged ${files === 1 ? "file" : "files"} · approximately ${size}`,
+    contextBinaryOmitted: (files) =>
+      `${files} binary ${files === 1 ? "file has" : "files have"} content omitted.`,
+    contextExcluded: (files) =>
+      `${files} sensitive ${files === 1 ? "file is" : "files are"} excluded.`,
+    contextTruncated: "The context is truncated at RepoPuck's safe size limit.",
+    contextUnavailable: "Stage files in an open repository to preview the AI context.",
     recentRepositories: "Recent repositories",
     clear: "Clear",
     clearRecentRepositories: "Clear recent repositories",
@@ -343,6 +379,14 @@ const zhCN: ShellCopy = {
     apiKey: "API 密钥",
     apiKeyDescription:
       "密钥保存在 Windows 凭据管理器中，不会写入 settings.json。",
+    providerKeyScope: (provider) =>
+      `凭据仅用于 ${provider}；更换服务主机时绝不会自动复用此密钥。`,
+    providerChanged: (provider) =>
+      `服务主机已更改为 ${provider}。请确认该主机已有的密钥，或保存一个新密钥。`,
+    legacyKeyAvailable: (provider) =>
+      `检测到旧版 RepoPuck 保存的密钥。将它分配给 ${provider} 前需要你的明确确认。`,
+    useSavedKey: "使用已保存密钥",
+    confirmLegacyKey: "确认使用旧密钥",
     aiApiKey: "AI API 密钥",
     replaceKeyPlaceholder: "输入新密钥以替换",
     enterKeyPlaceholder: "输入 API 密钥",
@@ -351,13 +395,23 @@ const zhCN: ShellCopy = {
     remove: "移除",
     checkingKeyStorage: "正在检查安全密钥存储…",
     keySaved: "API 密钥已安全保存。",
+    keySavedFor: (provider) => `已为 ${provider} 安全保存 API 密钥。`,
     noKeySaved: "尚未保存 API 密钥。",
+    noKeySavedFor: (provider) => `尚未为 ${provider} 保存 API 密钥。`,
     savingToCredentialManager: "正在保存到 Windows 凭据管理器…",
     removingKey: "正在移除已保存的 API 密钥…",
     secureStorageDesktopOnly: "安全 API 密钥存储仅在 RepoPuck 桌面应用中可用。",
     privacyTitle: "隐私说明：",
     privacyDescription:
       "只有点击 AI 按钮时，已暂存文件的文本差异才会发送到所选 AI 服务。敏感路径和二进制内容会被排除，疑似密钥的常见文本行会被脱敏。",
+    contextTitle: "AI 上下文预览",
+    contextDescription: "这是 RepoPuck 在请求前准备的已暂存上下文。",
+    contextLoading: "正在检查已暂存上下文…",
+    contextReady: (files, size) => `${files} 个已暂存文件 · 约 ${size}`,
+    contextBinaryOmitted: (files) => `${files} 个二进制文件的内容不会发送。`,
+    contextExcluded: (files) => `${files} 个敏感文件已排除。`,
+    contextTruncated: "上下文已按 RepoPuck 的安全大小限制截断。",
+    contextUnavailable: "请在已打开的仓库中暂存文件，以预览 AI 上下文。",
     recentRepositories: "最近使用的仓库",
     clear: "清空",
     clearRecentRepositories: "清空最近使用的仓库",
@@ -494,6 +548,24 @@ export function localizeShellError(
       language === "zh-CN"
         ? "安全的 AI API 密钥存储仅支持 Windows。"
         : "Secure AI API key storage is supported on Windows only.",
+    "Enter a valid AI base URL":
+      language === "zh-CN" ? "请输入有效的 AI 服务基础 URL。" : "Enter a valid AI base URL.",
+    "AI base URL must not contain credentials":
+      language === "zh-CN"
+        ? "AI 服务基础 URL 不能包含用户名或密码。"
+        : "AI base URL must not contain credentials.",
+    "AI base URL must use HTTPS (HTTP is allowed only for localhost)":
+      language === "zh-CN"
+        ? "AI 服务基础 URL 必须使用 HTTPS（仅 localhost 可使用 HTTP）。"
+        : "AI base URL must use HTTPS (HTTP is allowed only for localhost).",
+    "AI base URL must include a host":
+      language === "zh-CN"
+        ? "AI 服务基础 URL 必须包含主机。"
+        : "AI base URL must include a host.",
+    "No legacy AI API key is available to confirm":
+      language === "zh-CN"
+        ? "没有可供确认的旧版 AI API 密钥。"
+        : "No legacy AI API key is available to confirm.",
   };
   return known[message] ?? message;
 }

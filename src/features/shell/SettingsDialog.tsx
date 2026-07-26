@@ -7,7 +7,7 @@ import {
   TrashIcon,
 } from "@primer/octicons-react";
 import { Button, Dialog } from "@primer/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import { getShellCopy, localizeShellError } from "../../i18n/shell";
 import {
@@ -27,6 +27,16 @@ import "./native-shell.css";
 
 interface ApiKeyStatus {
   configured: boolean;
+  legacyConfigured: boolean;
+  providerHost: string;
+}
+
+interface AiContextSummary {
+  includedFiles: number;
+  approximateBytes: number;
+  binaryFiles: number;
+  truncated: boolean;
+  excludedFiles: string[];
 }
 
 interface ApiKeyOperationResult {
@@ -34,7 +44,14 @@ interface ApiKeyOperationResult {
   message?: string;
 }
 
-type ApiKeyState = "checking" | "saved" | "missing" | "unavailable" | "saving" | "deleting";
+type ApiKeyState =
+  | "checking"
+  | "saved"
+  | "missing"
+  | "unavailable"
+  | "saving"
+  | "deleting";
+type AiContextState = "loading" | "ready" | "unavailable";
 
 const COMMIT_TYPES: ConventionalCommitType[] = [
   "feat",
@@ -52,6 +69,12 @@ const COMMIT_TYPES: ConventionalCommitType[] = [
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+function formatContextBytes(bytes: number, language: string) {
+  if (bytes < 1024) return `${bytes} B`;
+  const value = bytes / 1024;
+  return `${new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(value)} KB`;
 }
 
 interface SettingsDialogProps {
@@ -88,23 +111,88 @@ export function SettingsDialog({
   const [apiKey, setApiKey] = useState("");
   const [apiKeyState, setApiKeyState] = useState<ApiKeyState>("checking");
   const [apiKeyError, setApiKeyError] = useState<string | null>(null);
+  const [providerHost, setProviderHost] = useState<string | null>(null);
+  const [providerHasStoredKey, setProviderHasStoredKey] = useState(false);
+  const [legacyKeyAvailable, setLegacyKeyAvailable] = useState(false);
+  const [hostConfirmationRequired, setHostConfirmationRequired] = useState(false);
+  const [contextState, setContextState] = useState<AiContextState>("loading");
+  const [contextSummary, setContextSummary] = useState<AiContextSummary | null>(null);
+  const confirmedProviderHost = useRef<string | null>(null);
 
   useEffect(() => {
     setApiKey("");
     setApiKeyError(null);
+    setProviderHost(null);
+    setProviderHasStoredKey(false);
+    setLegacyKeyAvailable(false);
+    setHostConfirmationRequired(false);
+    setContextSummary(null);
+    confirmedProviderHost.current = null;
     if (!open) return;
     if (!isTauriRuntime()) {
       setApiKeyState("unavailable");
+      setContextState("unavailable");
       return;
     }
     let cancelled = false;
+    setContextState("loading");
+    void invoke<AiContextSummary>("get_ai_context_summary")
+      .then((summary) => {
+        if (
+          !cancelled &&
+          Number.isFinite(summary.includedFiles) &&
+          Number.isFinite(summary.approximateBytes) &&
+          Number.isFinite(summary.binaryFiles) &&
+          Array.isArray(summary.excludedFiles)
+        ) {
+          setContextSummary(summary);
+          setContextState("ready");
+        } else if (!cancelled) {
+          setContextState("unavailable");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setContextState("unavailable");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !isTauriRuntime()) return;
+    let cancelled = false;
     setApiKeyState("checking");
-    void invoke<ApiKeyStatus>("get_ai_key_status")
+    setApiKeyError(null);
+    void invoke<ApiKeyStatus>("get_ai_key_status", {
+      baseUrl: aiCommit.baseUrl,
+    })
       .then((status) => {
-        if (!cancelled) setApiKeyState(status.configured ? "saved" : "missing");
+        if (cancelled) return;
+        const nextProviderHost =
+          typeof status.providerHost === "string" && status.providerHost.length > 0
+            ? status.providerHost
+            : null;
+        const confirmedHost = confirmedProviderHost.current;
+        if (confirmedHost === null && nextProviderHost) {
+          confirmedProviderHost.current = nextProviderHost;
+          setHostConfirmationRequired(false);
+        } else if (nextProviderHost) {
+          setHostConfirmationRequired(confirmedHost !== nextProviderHost);
+        } else {
+          setHostConfirmationRequired(false);
+        }
+        setProviderHost(nextProviderHost);
+        setProviderHasStoredKey(status.configured);
+        setLegacyKeyAvailable(Boolean(status.legacyConfigured) && !status.configured);
+        setApiKeyState(status.configured ? "saved" : "missing");
       })
       .catch(() => {
         if (!cancelled) {
+          setProviderHost(null);
+          setProviderHasStoredKey(false);
+          setLegacyKeyAvailable(false);
+          setHostConfirmationRequired(true);
           setApiKeyState("missing");
           setApiKeyError("RepoPuck could not read the saved API key status.");
         }
@@ -112,7 +200,7 @@ export function SettingsDialog({
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [aiCommit.baseUrl, open]);
 
   const changeAiCommit = (change: Partial<AICommitPreferences>) => {
     setAiCommitPreferences({ ...aiCommit, ...change });
@@ -129,10 +217,15 @@ export function SettingsDialog({
     setApiKeyState("saving");
     try {
       const result = await invoke<ApiKeyOperationResult>("save_ai_api_key", {
+        baseUrl: aiCommit.baseUrl,
         apiKey: value,
       });
       if (!result.success) throw new Error(result.message);
       setApiKey("");
+      setProviderHasStoredKey(true);
+      setLegacyKeyAvailable(false);
+      setHostConfirmationRequired(false);
+      confirmedProviderHost.current = providerHost;
       setApiKeyState("saved");
     } catch (error) {
       setApiKeyState(hadSavedKey ? "saved" : "missing");
@@ -148,9 +241,12 @@ export function SettingsDialog({
     setApiKeyError(null);
     setApiKeyState("deleting");
     try {
-      const result = await invoke<ApiKeyOperationResult>("delete_ai_api_key");
+      const result = await invoke<ApiKeyOperationResult>("delete_ai_api_key", {
+        baseUrl: aiCommit.baseUrl,
+      });
       if (!result.success) throw new Error(result.message);
       setApiKey("");
+      setProviderHasStoredKey(false);
       setApiKeyState("missing");
     } catch (error) {
       setApiKeyState("saved");
@@ -158,6 +254,36 @@ export function SettingsDialog({
         error instanceof Error && error.message
           ? error.message
           : "RepoPuck could not remove the API key.",
+      );
+    }
+  };
+
+  const confirmProviderKey = async () => {
+    if (!providerHost) return;
+    if (providerHasStoredKey) {
+      confirmedProviderHost.current = providerHost;
+      setHostConfirmationRequired(false);
+      return;
+    }
+    if (!legacyKeyAvailable) return;
+    setApiKeyError(null);
+    setApiKeyState("saving");
+    try {
+      const result = await invoke<ApiKeyOperationResult>("migrate_legacy_ai_api_key", {
+        baseUrl: aiCommit.baseUrl,
+      });
+      if (!result.success) throw new Error(result.message);
+      confirmedProviderHost.current = providerHost;
+      setProviderHasStoredKey(true);
+      setLegacyKeyAvailable(false);
+      setHostConfirmationRequired(false);
+      setApiKeyState("saved");
+    } catch (error) {
+      setApiKeyState("missing");
+      setApiKeyError(
+        error instanceof Error && error.message
+          ? error.message
+          : "RepoPuck could not save the API key.",
       );
     }
   };
@@ -297,6 +423,9 @@ export function SettingsDialog({
                 onChange={(event) => changeAiCommit({ baseUrl: event.target.value })}
               />
               <small id="ai-base-url-help">{copy.settings.aiBaseUrlHelp}</small>
+              {providerHost && (
+                <small>{copy.settings.providerKeyScope(providerHost)}</small>
+              )}
             </label>
 
             <label className="settings-field ai-settings-wide" htmlFor="ai-model">
@@ -374,6 +503,29 @@ export function SettingsDialog({
                 <small>{copy.settings.apiKeyDescription}</small>
               </span>
             </div>
+            {(hostConfirmationRequired || legacyKeyAvailable) && providerHost && (
+              <div className="api-provider-confirmation" role="alert">
+                <span>
+                  {legacyKeyAvailable
+                    ? copy.settings.legacyKeyAvailable(providerHost)
+                    : copy.settings.providerChanged(providerHost)}
+                </span>
+                {(providerHasStoredKey || legacyKeyAvailable) && (
+                  <Button
+                    disabled={
+                      apiKeyState === "checking" ||
+                      apiKeyState === "saving" ||
+                      apiKeyState === "deleting"
+                    }
+                    onClick={() => void confirmProviderKey()}
+                  >
+                    {legacyKeyAvailable
+                      ? copy.settings.confirmLegacyKey
+                      : copy.settings.useSavedKey}
+                  </Button>
+                )}
+              </div>
+            )}
             <div className="api-key-controls">
               <label className="sr-only" htmlFor="ai-api-key">
                 {copy.settings.aiApiKey}
@@ -437,10 +589,15 @@ export function SettingsDialog({
                 {apiKeyState === "saved" && (
                   <>
                     <ShieldLockIcon size={14} aria-hidden="true" />{" "}
-                    {copy.settings.keySaved}
+                    {providerHost
+                      ? copy.settings.keySavedFor(providerHost)
+                      : copy.settings.keySaved}
                   </>
                 )}
-                {apiKeyState === "missing" && copy.settings.noKeySaved}
+                {apiKeyState === "missing" &&
+                  (providerHost
+                    ? copy.settings.noKeySavedFor(providerHost)
+                    : copy.settings.noKeySaved)}
                 {apiKeyState === "saving" &&
                   copy.settings.savingToCredentialManager}
                 {apiKeyState === "deleting" && copy.settings.removingKey}
@@ -452,6 +609,40 @@ export function SettingsDialog({
               <p className="api-key-status api-key-status--error" role="alert">
                 {localizeShellError(apiKeyError, language)}
               </p>
+            )}
+          </div>
+
+          <div className="ai-context-card">
+            <div>
+              <strong>{copy.settings.contextTitle}</strong>
+              <small>{copy.settings.contextDescription}</small>
+            </div>
+            {contextState === "loading" && <p>{copy.settings.contextLoading}</p>}
+            {contextState === "unavailable" && (
+              <p>{copy.settings.contextUnavailable}</p>
+            )}
+            {contextState === "ready" && contextSummary && (
+              <div className="ai-context-summary">
+                <strong>
+                  {copy.settings.contextReady(
+                    contextSummary.includedFiles,
+                    formatContextBytes(contextSummary.approximateBytes, language),
+                  )}
+                </strong>
+                {contextSummary.binaryFiles > 0 && (
+                  <span>
+                    {copy.settings.contextBinaryOmitted(contextSummary.binaryFiles)}
+                  </span>
+                )}
+                {contextSummary.excludedFiles.length > 0 && (
+                  <span>
+                    {copy.settings.contextExcluded(contextSummary.excludedFiles.length)}
+                  </span>
+                )}
+                {contextSummary.truncated && (
+                  <span>{copy.settings.contextTruncated}</span>
+                )}
+              </div>
             )}
           </div>
 
