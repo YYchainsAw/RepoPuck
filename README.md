@@ -4,7 +4,7 @@
   <h1>RepoPuck</h1>
 
   <p><strong>随时在桌面，提交只需几秒。</strong></p>
-  <p>轻量 Windows 桌面 Git 助手；检测到 Unity 或 Unreal 项目时按需增强。</p>
+  <p>轻量 Windows 桌面 Git 助手，让暂存、提交与推送更快一步。</p>
 
   <p>
     <strong>简体中文</strong>
@@ -31,10 +31,7 @@
 
 <br>
 
-RepoPuck 把最常用的 Git 操作放在一个随叫随到的小面板里。无论是普通代码仓库、Visual Studio 解决方案还是游戏项目，都可以选择文件、切换分支、提交和推送，而不必为了一个小提交打开完整 Git 客户端。
-
-> [!IMPORTANT]
-> **使用 RepoPuck 不需要安装 Unity 包或 Unreal 插件。** 手动选择项目后，游戏项目识别、文件分类和安全检查即可工作。仓库内附带的编辑器桥接仅用于“打开编辑器时自动唤醒 RepoPuck”，完全可选。
+RepoPuck 把最常用的 Git 操作放在一个随叫随到的小面板里。你可以选择文件、切换分支、提交和推送，而不必为了一个小提交打开完整 Git 客户端。
 
 <p align="center">
   <img src="docs/qa/v020/island-attached-composite.png" width="720" alt="RepoPuck 顶部灵动岛与 Git 面板">
@@ -44,7 +41,6 @@ RepoPuck 把最常用的 Git 操作放在一个随叫随到的小面板里。无
 
 - ⚡ **更短的提交路径**：勾选文件，输入说明，然后分别选择 **Commit** 或 **Commit & Push**。
 - 🤖 **AI 提交信息草稿**：使用自己的 OpenAI 兼容 API，根据已暂存变更生成中文或英文的 Conventional Commit。
-- 🎮 **游戏项目按需增强**：仅在识别到 Unity 或 Unreal 项目后，显示语义文件分组与提交前安全提示；普通仓库保持纯粹的 Git 界面。
 - 🧩 **三种桌面形态**：悬浮球、顶部灵动岛、顶部自动展开卷轴，按你的工作习惯切换。
 - 🪶 **轻量而专注**：常用操作直接可见，次要操作收进更多菜单，不试图复制一个完整 IDE。
 - 🌗 **熟悉的 GitHub 风格**：基于 GitHub Primer，支持浅色、深色和跟随系统主题。
@@ -69,43 +65,6 @@ RepoPuck 把最常用的 Git 操作放在一个随叫随到的小面板里。无
 | <img src="docs/qa/v020/puck-panel.png" alt="RepoPuck 悬浮球面板" width="260"> | <img src="docs/qa/v020/island-attached-composite.png" alt="RepoPuck 顶部灵动岛" width="260"> | <img src="docs/qa/v020/drawer-open-right.png" alt="RepoPuck 顶部卷轴" width="260"> |
 
 面板可调整大小并分别记忆三种模式的尺寸。顶部卷轴使用原生鼠标热区，而不是覆盖桌面的透明网页窗口；隐藏后不会挡住顶部区域的点击。
-
-## 🎮 检测到游戏项目后按需增强
-
-RepoPuck 的默认定位始终是轻量 Git 工具。普通仓库只显示通用 Git 功能；只有检测到 Unity 或 Unreal 项目的明确结构后，才会出现游戏项目横幅、语义文件分组和额外的只读安全分析。
-
-### 项目识别
-
-- **Unity**：识别项目根目录中的 `Assets` 与 `ProjectSettings`，并在可用时读取 `ProjectSettings/ProjectVersion.txt`。
-- **Unreal Engine**：识别 `.uproject` 以及 `Content`、`Config`、`Source` 或 `Plugins` 目录，并在可用时读取 `EngineAssociation`。
-- **嵌套项目**：Unity 或 Unreal 项目可以位于更大的 Git 仓库子目录中。RepoPuck 从仓库根执行 Git，同时记住实际选择的游戏项目目录。
-- **Visual Studio**：不需要扩展或插件；选择其 Git 仓库即可使用 RepoPuck 的全部通用 Git 工作流。
-
-检测到游戏项目后，已跟踪或已暂存文件会按用途归类：
-
-| 分类 | 常见内容 |
-| --- | --- |
-| 💻 **Code** | C++、C#、脚本、Shader 与相关源码 |
-| 🎬 **Scenes & Blueprints** | Unity Scene、Prefab、Playable，Unreal Map 与 Blueprint 资源 |
-| 🎨 **Assets** | 模型、贴图、音频、视频、字体与引擎资源 |
-| ⚙️ **Configuration** | ProjectSettings、Packages、Config、`.uproject`、`.uplugin`、`.meta` 等 |
-| 🧹 **Generated files** | Unity Library/Temp/Logs，Unreal Binaries/Intermediate/Saved 等 |
-| 📄 **Other changes** | 未匹配已知规则的其他文件 |
-
-未跟踪文件仍保留在独立的 **Unversioned files** 分组中，避免不小心把新生成内容一起提交。
-
-### 提交前安全提示
-
-RepoPuck 会对当前变更给出可解释的建议：
-
-- 🧩 Unity 资源缺少 `.meta`、孤立 `.meta`，或资源与 `.meta` 只有一侧被暂存。
-- 🧹 Unity / Unreal 缓存、日志、构建和生成目录出现在变更中。
-- 🐘 文件达到 50 MiB 时提醒，达到 100 MiB 时提高风险级别。
-- 📦 常见引擎二进制格式，或达到 10 MiB 的场景/资源文件，建议检查 Git LFS。
-- 🎯 已暂存文件按 Git index 中即将提交的真实 blob 检查，而不是只看工作区副本。
-- ✅ 只有暂存的 `filter=lfs` 规则与规范 Git LFS pointer 同时存在时，才视为已正确使用 LFS。
-
-这些检查**只提供建议**。RepoPuck 不会自动修改 `.gitignore` 或 `.gitattributes`、安装 Git LFS、暂存配对文件，也不会阻止提交。
 
 ## ✅ Git 工作流
 
@@ -163,6 +122,10 @@ RepoPuck 在本地强制组装 Conventional Commit 格式，因此可以稳定�
 - 远端操作所需的 Git Credential Manager 凭据，或已配置的 SSH agent / key
 
 RepoPuck 不提供单独的终端登录窗口。建议先在仓库终端中确认 `git fetch` 或 `git push` 能正常工作。
+
+## 🧩 可选的项目感知增强
+
+RepoPuck 对普通仓库始终保持纯粹的通用 Git 界面。只有在明确识别到受支持的项目结构后，才会按需显示语义文件分组与额外的只读安全提示；这些能力不会改变、暂存或阻止你的文件。
 
 ## 🔗 可选：随编辑器自动启动
 
@@ -323,7 +286,7 @@ RepoPuck 专注于高频、低摩擦的提交路径。复杂历史操作继续�
 
 如果 RepoPuck 让你的提交工作流更顺手：
 
-- ⭐ 给仓库一个 Star，让更多 Unity、Unreal 和 Windows 开发者看到它。
+- ⭐ 给仓库一个 Star，让更多 Windows 开发者看到它。
 - 🐛 提交可复现的 Issue。
 - 💡 分享真实项目中的工作流需求。
 - 🧑‍💻 修复问题或提交聚焦的 Pull Request。
