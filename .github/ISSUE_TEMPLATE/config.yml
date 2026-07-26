@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "💬 使用帮助 / Support and questions"
+    url: "https://github.com/YYchainsAw/RepoPuck/blob/main/SUPPORT.md"
+    about: "安装、配置和使用问题请先查看支持指南 / Read the support guide for installation, configuration, and usage questions"
+  - name: "🔒 安全漏洞 / Security vulnerability"
+    url: "https://github.com/YYchainsAw/RepoPuck/security/policy"
+    about: "不要公开安全细节，请按安全策略私下报告 / Do not disclose security details publicly; follow the private reporting policy"
