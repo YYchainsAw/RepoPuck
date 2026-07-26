@@ -128,21 +128,29 @@ jobs:
         id: release_assets
         shell: pwsh
         run: |
+          $releaseVersion = $env:GITHUB_REF_NAME -replace '^v', ''
           $msiFiles = @(
-            Get-ChildItem -LiteralPath "src-tauri/target/release/bundle/msi" -Filter "*.msi" -File
+            Get-ChildItem `
+              -LiteralPath "src-tauri/target/release/bundle/msi" `
+              -Filter "RepoPuck_$($releaseVersion)_*.msi" `
+              -File
           )
           if ($msiFiles.Count -ne 1) {
-            throw "Expected exactly one MSI bundle, found $($msiFiles.Count)."
+            throw "Expected exactly one v$releaseVersion MSI bundle, found $($msiFiles.Count)."
           }
 
-          $msi = $msiFiles[0]
-          if ($msi.Length -le 0) {
-            throw "MSI bundle is empty: $($msi.FullName)"
+          $builtMsi = $msiFiles[0]
+          if ($builtMsi.Length -le 0) {
+            throw "MSI bundle is empty: $($builtMsi.FullName)"
           }
 
-          $digest = (Get-FileHash -LiteralPath $msi.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $releaseMsiName = "RepoPuck_$($releaseVersion)_windows-x64.msi"
+          $releaseMsiPath = Join-Path $env:GITHUB_WORKSPACE $releaseMsiName
+          Copy-Item -LiteralPath $builtMsi.FullName -Destination $releaseMsiPath
+
+          $digest = (Get-FileHash -LiteralPath $releaseMsiPath -Algorithm SHA256).Hash.ToLowerInvariant()
           $checksumPath = Join-Path $env:GITHUB_WORKSPACE "SHA256SUMS.txt"
-          "$digest *$($msi.Name)" |
+          "$digest *$releaseMsiName" |
             Set-Content -LiteralPath $checksumPath -Encoding ascii
 
           $sourceNotesPath = ".github/release-notes/$env:GITHUB_REF_NAME.md"
@@ -154,7 +162,7 @@ jobs:
             ""
             "## 🔐 SHA-256 / 文件校验"
             ""
-            "``$($msi.Name)``"
+            "``$releaseMsiName``"
             ""
             "``````text"
             $digest
@@ -165,7 +173,7 @@ jobs:
           ($sourceNotes.TrimEnd() + [Environment]::NewLine + $checksumSection) |
             Set-Content -LiteralPath $generatedNotesPath -Encoding utf8
 
-          "msi_path=$($msi.FullName)" >> $env:GITHUB_OUTPUT
+          "msi_path=$releaseMsiPath" >> $env:GITHUB_OUTPUT
           "checksum_path=$checksumPath" >> $env:GITHUB_OUTPUT
           "generated_notes_path=$generatedNotesPath" >> $env:GITHUB_OUTPUT
 

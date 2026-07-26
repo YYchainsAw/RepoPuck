@@ -4,7 +4,7 @@
   <h1>RepoPuck</h1>
 
   <p><strong>Small on screen. Fast in flow.</strong></p>
-  <p>A lightweight Windows Git companion with optional Unity and Unreal enhancements when detected.</p>
+  <p>A lightweight Windows Git companion for faster staging, commits, and pushes.</p>
 
   <p>
     <a href="README.md">简体中文</a>
@@ -31,10 +31,7 @@
 
 <br>
 
-RepoPuck keeps everyday Git actions in a small panel that is always close by. Whether you are working in an ordinary code repository, a Visual Studio solution, or a game project, you can select files, switch branches, commit, and push without opening a full Git client for a tiny change.
-
-> [!IMPORTANT]
-> **RepoPuck does not require a Unity package or Unreal plugin.** Select a project manually and game-project detection, semantic file groups, and safety checks work immediately. The included editor bridges are optional and only wake RepoPuck when an editor opens.
+RepoPuck keeps everyday Git actions in a small panel that is always close by. Select files, switch branches, commit, and push without opening a full Git client for a tiny change.
 
 <p align="center">
   <img src="docs/qa/v020/island-attached-composite.png" width="720" alt="RepoPuck top island and Git panel">
@@ -44,7 +41,6 @@ RepoPuck keeps everyday Git actions in a small panel that is always close by. Wh
 
 - ⚡ **A shorter commit path** — select files, write a message, then choose **Commit** or **Commit & Push**.
 - 🤖 **AI commit-message drafts** — use your own OpenAI-compatible API to turn staged changes into Chinese or English Conventional Commits.
-- 🎮 **Game-aware only when relevant** — semantic groups and pre-commit guidance appear only after RepoPuck detects a Unity or Unreal project; ordinary repositories keep a focused Git interface.
 - 🧩 **Three desktop surfaces** — use a floating puck, an attached top island, or an auto-revealing top drawer.
 - 🪶 **Lightweight and focused** — common actions stay visible while secondary actions live in the More menu.
 - 🌗 **A familiar GitHub-style interface** — powered by GitHub Primer with light, dark, and system themes.
@@ -69,43 +65,6 @@ Choose a mode from **More → Settings → Launch mode**. Every mode uses the sa
 | <img src="docs/qa/v020/puck-panel.png" alt="RepoPuck floating puck panel" width="260"> | <img src="docs/qa/v020/island-attached-composite.png" alt="RepoPuck top island" width="260"> | <img src="docs/qa/v020/drawer-open-right.png" alt="RepoPuck top drawer" width="260"> |
 
 The panel is resizable and remembers a separate size for each mode. The drawer uses a native cursor hot zone instead of a transparent WebView covering the desktop, so it does not block clicks near the top edge while hidden.
-
-## 🎮 Game-project enhancements when detected
-
-RepoPuck remains a lightweight Git tool first. Ordinary repositories show only the generic Git workflow; a game-project banner, semantic groups, and additional read-only safety analysis appear only after the selected folder is positively detected as Unity or Unreal.
-
-### Project detection
-
-- **Unity** — recognizes root-level `Assets` and `ProjectSettings` directories and reads `ProjectSettings/ProjectVersion.txt` when available.
-- **Unreal Engine** — recognizes a `.uproject` plus at least one of `Content`, `Config`, `Source`, or `Plugins`, and reads `EngineAssociation` when available.
-- **Nested projects** — a Unity or Unreal project may live below a larger Git root. RepoPuck runs Git from the repository root while remembering the game-project directory the user selected.
-- **Visual Studio** — no extension is required; select its Git repository to use the complete generic RepoPuck workflow.
-
-Detected game projects organize tracked or staged paths by purpose:
-
-| Group | Typical contents |
-| --- | --- |
-| 💻 **Code** | C++, C#, scripts, shaders, and related source |
-| 🎬 **Scenes & Blueprints** | Unity scenes, prefabs, and playables; Unreal maps and Blueprint assets |
-| 🎨 **Assets** | Models, textures, audio, video, fonts, and engine assets |
-| ⚙️ **Configuration** | ProjectSettings, Packages, Config, `.uproject`, `.uplugin`, `.meta`, and related files |
-| 🧹 **Generated files** | Unity Library/Temp/Logs and Unreal Binaries/Intermediate/Saved output |
-| 📄 **Other changes** | Paths that do not match a known convention |
-
-Untracked paths remain in a separate **Unversioned files** group so newly generated content is not silently mixed into a commit.
-
-### Pre-commit safety guidance
-
-RepoPuck explains common risks in the current change set:
-
-- 🧩 A Unity asset with no `.meta`, an orphaned `.meta`, or only one staged side of an asset/`.meta` pair.
-- 🧹 Changed Unity or Unreal cache, log, build, and generated-output directories.
-- 🐘 A warning at 50 MiB and a higher-severity notice at 100 MiB.
-- 📦 Git LFS guidance for common engine binary formats and other scene or asset files at least 10 MiB.
-- 🎯 Staged-file checks based on the exact blob in the Git index, not only the working-tree copy.
-- ✅ An LFS candidate counts as correctly staged only when both `filter=lfs` and a canonical Git LFS pointer are present in the index.
-
-These checks are **advisory**. RepoPuck does not rewrite `.gitignore` or `.gitattributes`, install Git LFS, stage companion files automatically, or block a commit.
 
 ## ✅ Git workflow
 
@@ -163,6 +122,10 @@ RepoPuck assembles the Conventional Commit prefix locally, so results consistent
 - Existing Git Credential Manager credentials or a configured SSH agent/key for remote operations
 
 RepoPuck does not host an interactive terminal sign-in flow. Confirm that `git fetch` or `git push` works in the repository terminal before using remote actions.
+
+## 🧩 Optional project-aware enhancements
+
+RepoPuck keeps the ordinary repository experience focused on common Git actions. Semantic file groups and additional read-only safety guidance appear only after a supported project structure is positively detected; these features never modify, stage, or block your files.
 
 ## 🔗 Optional: open with the editor
 
@@ -323,7 +286,7 @@ Changes to native windows, the tray, Git processes, or packaging also need a Win
 
 If RepoPuck makes your workflow better:
 
-- ⭐ Star the repository so more Unity, Unreal, and Windows developers can find it.
+- ⭐ Star the repository so more Windows developers can find it.
 - 🐛 Open a reproducible issue.
 - 💡 Share a real project workflow.
 - 🧑‍💻 Fix a focused problem or submit a pull request.
