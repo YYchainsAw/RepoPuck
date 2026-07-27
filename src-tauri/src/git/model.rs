@@ -94,3 +94,53 @@ impl OperationResult {
         }
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CommitAndPushStage {
+    Commit,
+    Push,
+    Complete,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitAndPushResult {
+    pub success: bool,
+    pub committed: bool,
+    pub pushed: bool,
+    pub stage: CommitAndPushStage,
+    pub message: String,
+}
+
+impl CommitAndPushResult {
+    pub fn commit_failed(message: impl Into<String>) -> Self {
+        Self {
+            success: false,
+            committed: false,
+            pushed: false,
+            stage: CommitAndPushStage::Commit,
+            message: message.into(),
+        }
+    }
+
+    pub fn push_failed(message: impl Into<String>) -> Self {
+        Self {
+            success: false,
+            committed: true,
+            pushed: false,
+            stage: CommitAndPushStage::Push,
+            message: message.into(),
+        }
+    }
+
+    pub fn complete(message: impl Into<String>) -> Self {
+        Self {
+            success: true,
+            committed: true,
+            pushed: true,
+            stage: CommitAndPushStage::Complete,
+            message: message.into(),
+        }
+    }
+}

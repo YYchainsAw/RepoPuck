@@ -1,0 +1,118 @@
+name: "🐛 Bug 报告 / Bug report"
+description: "报告可复现的问题，帮助 RepoPuck 变得更稳定 / Report a reproducible problem"
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢你帮助改进 RepoPuck！请先隐藏仓库地址中的凭据、API Key、令牌、用户名和其他敏感信息。
+
+        Thanks for helping improve RepoPuck. Please remove credentials, API keys, tokens, usernames, and other sensitive information before submitting.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: "提交前检查 / Preflight"
+      options:
+        - label: "我使用的是最新版本，并已搜索现有 Issue，未发现相同问题。/ I use the latest release and found no matching issue."
+          required: true
+        - label: "我确认这不是安全漏洞；安全问题将按照 SECURITY.md 私下报告。/ This is not a security vulnerability; security reports follow SECURITY.md."
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: "RepoPuck 版本 / Version"
+      description: "可在设置或安装包名称中查看 / Find it in Settings or the installer name"
+      placeholder: "例如 / e.g. 0.2.2"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: "安装方式 / Installation"
+      options:
+        - "MSI 安装包 / MSI installer"
+        - "便携版 / Portable build"
+        - "源码运行 / Built from source"
+        - "其他 / Other"
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: "Windows 环境 / Windows environment"
+      description: "请包含 Windows 版本、架构和显示缩放 / Include Windows version, architecture, and display scaling"
+      placeholder: "例如 / e.g. Windows 11 24H2, x64, 150% scaling"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: entry-mode
+    attributes:
+      label: "使用模式 / Entry mode"
+      options:
+        - "悬浮球 / Floating puck"
+        - "顶部贴合 / Top attached"
+        - "顶部卷轴 / Top roll-down"
+        - "托盘或主面板 / Tray or main panel"
+        - "与模式无关 / Not mode-specific"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: "复现步骤 / Steps to reproduce"
+      description: "请从启动 RepoPuck 开始，写出最短的稳定复现路径 / Start from launching RepoPuck and provide the shortest reliable path"
+      placeholder: |
+        1. 打开……
+        2. 选择……
+        3. 点击……
+        4. 出现……
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: "预期行为 / Expected behavior"
+      placeholder: "你原本期望发生什么？/ What did you expect to happen?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: "实际行为 / Actual behavior"
+      placeholder: "实际发生了什么？是否每次出现？/ What happened instead? Does it happen every time?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: repository-context
+    attributes:
+      label: "仓库与 Git 环境 / Repository and Git context"
+      description: "不要填写私有仓库地址；可提供 Git 版本、文件数量、是否使用 LFS/子模块等 / Do not include private remote URLs; Git version, change count, LFS, and submodules are useful"
+      placeholder: |
+        Git version:
+        Approximate changed file count:
+        Git LFS/submodules:
+        Local or network drive:
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: "截图、录屏或日志 / Screenshots, recordings, or logs"
+      description: "拖入附件，并在提交前移除凭据、远程 URL 和个人路径 / Attach evidence after removing credentials, remote URLs, and personal paths"
+      placeholder: "可选 / Optional"
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: "补充信息 / Additional context"
+      placeholder: "最近是否升级、切换主题、连接多显示器或更换 Git 配置？/ Recent updates, theme changes, multiple monitors, or Git configuration changes?"

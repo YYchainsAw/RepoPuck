@@ -22,6 +22,7 @@ export interface GitWorkspaceValue {
   selectedRepository: RepositorySnapshot["repository"] | null;
   commitMessage: string;
   busyAction: GitAction | null;
+  cancellingOperation: boolean;
   generatingCommitMessage: boolean;
   notice: string | null;
   clearNotice(): void;
@@ -40,6 +41,7 @@ export interface GitWorkspaceValue {
   fetch(): Promise<boolean>;
   pull(): Promise<boolean>;
   stash(): Promise<boolean>;
+  cancelOperation(): Promise<boolean>;
   openTerminal(): Promise<boolean>;
   openExplorer(): Promise<boolean>;
 }

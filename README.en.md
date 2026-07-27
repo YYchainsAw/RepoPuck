@@ -3,8 +3,8 @@
 
   <h1>RepoPuck</h1>
 
-  <p><strong>Small on screen. Fast in flow.</strong></p>
-  <p>A lightweight Windows Git companion for faster staging, commits, and pushes.</p>
+  <p><strong>Stage, commit, and push without leaving your flow.</strong></p>
+  <p>An always-ready Windows Git companion with no GitHub sign-in required.</p>
 
   <p>
     <a href="README.md">简体中文</a>
@@ -25,16 +25,26 @@
     ·
     <a href="#-quick-start">Quick start</a>
     ·
+    <a href="https://github.com/YYchainsAw/RepoPuck/discussions">Discussions</a>
+    ·
     <a href="#-contributing">Contributing</a>
   </p>
 </div>
 
 <br>
 
-RepoPuck keeps everyday Git actions in a small panel that is always close by. Select files, switch branches, commit, and push without opening a full Git client for a tiny change.
+RepoPuck keeps everyday Git actions in a small panel that is always close by. Select files, switch branches, commit, and push without leaving your current workflow for a small change.
 
 <p align="center">
-  <img src="docs/qa/v020/island-attached-composite.png" width="720" alt="RepoPuck top island and Git panel">
+  <img src="docs/images/repopuck-workflow-demo.gif" width="800" alt="RepoPuck workflow from desktop launcher to a completed commit">
+</p>
+
+<p align="center">
+  <strong>No GitHub sign-in</strong>
+  ·
+  <strong>AI stays optional</strong>
+  ·
+  <strong>Open source for Windows</strong>
 </p>
 
 ## ✨ Why RepoPuck?
@@ -43,6 +53,7 @@ RepoPuck keeps everyday Git actions in a small panel that is always close by. Se
 - 🤖 **AI commit-message drafts** — use your own OpenAI-compatible API to turn staged changes into Chinese or English Conventional Commits.
 - 🧩 **Three desktop surfaces** — use a floating puck, an attached top island, or an auto-revealing top drawer.
 - 🪶 **Lightweight and focused** — common actions stay visible while secondary actions live in the More menu.
+- ⚡ **Low-overhead refreshes** — when the repository is unchanged, RepoPuck checks a lightweight state fingerprint instead of rebuilding the full snapshot.
 - 🌗 **A familiar GitHub-style interface** — powered by GitHub Primer with light, dark, and system themes.
 - 🌐 **简体中文 and English** — follow the system language by default or switch manually in Settings.
 - 🔐 **No GitHub account lock-in** — reuse system Git, Git Credential Manager, or SSH.
@@ -50,9 +61,9 @@ RepoPuck keeps everyday Git actions in a small panel that is always close by. Se
 
 The interface follows the Windows language by default. Choose **System, 中文, or English** from **More → Settings → Interface language** to update the panel, puck or island, tray menu, and native confirmation dialogs together without restarting.
 
-## 🧭 Three desktop modes
+## 🧭 Three desktop entry points
 
-Choose a mode from **More → Settings → Launch mode**. Every mode uses the same Git workspace, so changing the surface does not change the selected repository, staged files, or commit draft.
+Choose an entry point from **More → Settings → Launch mode**. Every entry point uses the same Git workspace, so changing the surface does not change the selected repository, staged files, or commit draft.
 
 | Mode | Behavior | Best for |
 | --- | --- | --- |
@@ -76,7 +87,7 @@ The panel is resizable and remembers a separate size for each mode. The drawer u
 - ✅ Commit locally without pushing.
 - 🚀 Use the separate **Commit & Push** action or push later.
 - ✏️ Amend the most recent local commit after confirmation, without an automatic force-push.
-- 🔄 Fetch, pull, push, stash, and refresh.
+- 🔄 Fetch, pull, push, stash, and refresh; long-running Fetch operations show elapsed time and can be cancelled safely.
 - 🗂️ Open the repository in Explorer or a terminal.
 
 Keyboard shortcuts:
@@ -99,20 +110,20 @@ AI assistance is optional and never replaces the manual commit flow:
 RepoPuck assembles the Conventional Commit prefix locally, so results consistently follow forms such as `feat: subject` or `feat(ui): subject`. You can edit every generated draft before committing.
 
 > [!IMPORTANT]
-> The API key is stored only in **Windows Credential Manager** for the current user. It is never written to `settings.json`, browser storage, logs, or the repository. RepoPuck sends a size-bounded **staged text diff** only when you explicitly generate a message; known sensitive paths and binary contents are excluded, and common secret-looking lines are redacted. Automatic filtering cannot identify every secret, so review the staged content and your provider's privacy policy before using any third-party service.
+> API keys are stored separately for each provider origin in **Windows Credential Manager** for the current user. They are never written to `settings.json`, browser storage, logs, or the repository. After switching provider hosts, you must explicitly confirm an existing legacy key or save a key for that provider; RepoPuck never silently sends an old key to a new origin. Only when you explicitly generate a message does RepoPuck send a size-bounded **staged text diff** directly to the configured service. Settings previews the included file count, approximate bytes, omitted binaries, excluded sensitive paths, and truncation state. Automatic filtering cannot identify every secret, so review the staged content and your provider's privacy policy before using any third-party service.
 
 ## 🚀 Quick start
 
 ### Install
 
-1. Open [GitHub Releases](https://github.com/YYchainsAw/RepoPuck/releases/latest) and download the latest Windows MSI.
-2. Run the installer.
-3. Launch RepoPuck from the Start menu; it remains available in the system tray.
+1. Open [GitHub Releases](https://github.com/YYchainsAw/RepoPuck/releases/latest).
+2. Choose the standard MSI installer, or extract `windows-x64-portable.zip` and run it directly.
+3. Launch the installed build from the Start menu; either build remains available in the system tray.
 4. Choose a local Git repository.
 5. Select files, enter a commit message, then choose **Commit** or **Commit & Push**.
 
 > [!WARNING]
-> Current installers are not code-signed. Windows may show **Unknown publisher** or a Microsoft Defender SmartScreen warning. Download only from this repository's GitHub Releases and verify the SHA-256 published in the release notes.
+> Current installers are not code-signed. Windows may show **Unknown publisher** or a Microsoft Defender SmartScreen warning. Download only from this repository's GitHub Releases, then verify `SHA256SUMS.txt` and the GitHub build provenance attached to the release.
 
 ### Requirements
 
@@ -245,6 +256,9 @@ pnpm tauri build --bundles msi
 - [x] 🛡️ `.meta`, generated-file, large-file, and Git LFS guidance
 - [x] 🔗 Single-instance CLI, deep links, and optional editor bridge source
 - [x] 🤖 Optional Chinese and English AI Conventional Commit drafts
+- [x] ⚡ State-fingerprint refreshes, non-blocking remote operations, and cancellable Fetch
+- [x] 🔐 Provider-isolated AI credentials and outbound-context summaries
+- [x] 📦 Silent Windows MSI install/uninstall smoke tests
 - [ ] 🎮 Validate the bridges in more real Unity and Unreal editor versions
 - [ ] 🔏 Windows code signing
 - [ ] ⌨️ Configurable global keyboard shortcut
@@ -280,15 +294,16 @@ The installer does not yet carry a Windows code-signing certificate. Download on
 
 ## 🤝 Contributing
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before starting. Development is based on `develop`; prefer small, coherent commits and run the complete quality gates before opening a pull request.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before starting. For usage help, begin with [SUPPORT.md](SUPPORT.md). Development is based on `develop`; prefer small, coherent commits and run the complete quality gates before opening a pull request.
 
 Changes to native windows, the tray, Git processes, or packaging also need a Windows-native smoke test. Visible interface changes should include light/dark captures and a check at the minimum panel size.
 
 If RepoPuck makes your workflow better:
 
 - ⭐ Star the repository so more Windows developers can find it.
-- 🐛 Open a reproducible issue.
-- 💡 Share a real project workflow.
+- 🐛 Use the [Bug form](https://github.com/YYchainsAw/RepoPuck/issues/new?template=bug_report.yml) for a reproducible problem.
+- 💡 Use [Workflow feedback](https://github.com/YYchainsAw/RepoPuck/issues/new?template=workflow_feedback.yml) to share real Git friction.
+- 💬 Join [Discussions](https://github.com/YYchainsAw/RepoPuck/discussions) for installation help, usage questions, and ideas.
 - 🧑‍💻 Fix a focused problem or submit a pull request.
 
 ## 🙏 Acknowledgements
@@ -304,6 +319,6 @@ Copyright © 2026 YYchainsAw.
 ---
 
 <div align="center">
-  <strong>随时在桌面，提交只需几秒。</strong><br>
+  <strong>Git, one click away. Stay in flow.</strong><br>
   If RepoPuck helps you, consider leaving a ⭐ Star.
 </div>

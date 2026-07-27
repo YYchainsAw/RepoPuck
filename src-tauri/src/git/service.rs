@@ -12,7 +12,7 @@ use crate::game_projects::{
 use super::{
     model::{BranchSummary, RepositoryInfo, RepositorySnapshot},
     parser::{parse_changes, parse_changes_with_renames},
-    runner::{sanitize_remote_url, GitError, GitRunner},
+    runner::{sanitize_remote_url, GitCancellation, GitError, GitRunner},
 };
 
 #[derive(Clone, Debug)]
@@ -36,6 +36,8 @@ struct IndexBlob {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StagedAiContext {
     pub content: String,
+    pub included_files: usize,
+    pub binary_files: usize,
     pub truncated: bool,
     pub excluded_files: Vec<String>,
 }
@@ -69,6 +71,13 @@ impl GitService {
             runner: GitRunner::new(&root),
             game_project_root,
         })
+    }
+
+    pub fn with_cancellation(&self, cancellation: GitCancellation) -> Self {
+        Self {
+            runner: self.runner.with_cancellation(cancellation),
+            game_project_root: self.game_project_root.clone(),
+        }
     }
 
     pub fn snapshot(&self) -> Result<RepositorySnapshot, GitError> {
@@ -243,6 +252,8 @@ impl GitService {
             &selected_files,
         )?;
         let binary_paths = parse_binary_numstat_paths(&numstat)?;
+        let included_files = selected_files.len();
+        let binary_files = binary_paths.len();
         for path in &binary_paths {
             let section = format!("\n--- {path}\n[Binary file changed; content omitted.]\n");
             let limit_before_notice = MAX_CONTEXT_BYTES.saturating_sub(TRUNCATION_NOTICE.len());
@@ -279,9 +290,30 @@ impl GitService {
         }
         Ok(StagedAiContext {
             content,
+            included_files,
+            binary_files,
             truncated,
             excluded_files,
         })
+    }
+
+    pub fn refresh_token(&self) -> Result<String, GitError> {
+        let status = self.runner.run([
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "-z",
+            "--untracked-files=all",
+        ])?;
+        let unstaged =
+            self.runner
+                .run(["diff", "--numstat", "-z", "--no-ext-diff", "--no-textconv"])?;
+        let mut token_input =
+            Vec::with_capacity(std::mem::size_of::<u64>() + status.len() + unstaged.len());
+        token_input.extend_from_slice(&(status.len() as u64).to_le_bytes());
+        token_input.extend_from_slice(&status);
+        token_input.extend_from_slice(&unstaged);
+        Ok(format!("{:016x}", fnv1a(&token_input)))
     }
 
     pub fn set_staged(&self, paths: &[String], staged: bool) -> Result<(), GitError> {
@@ -1057,6 +1089,15 @@ fn text(output: &[u8]) -> String {
     String::from_utf8_lossy(output).into_owned()
 }
 
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
 fn invalid_repository() -> GitError {
     GitError::safe("The selected directory is not a Git repository")
 }
@@ -1390,6 +1431,8 @@ mod tests {
         let context = service.staged_diff_for_ai().expect("AI staged context");
 
         assert_eq!(context.excluded_files, vec!["config.ts"]);
+        assert_eq!(context.included_files, 1);
+        assert_eq!(context.binary_files, 0);
         assert!(context.content.contains("safe staged change"));
         assert!(!context.content.contains(".env"));
         assert!(!context.content.contains("must-not-leak"));
@@ -1415,6 +1458,8 @@ mod tests {
         let context = service.staged_diff_for_ai().expect("AI staged context");
 
         assert!(context.truncated);
+        assert_eq!(context.included_files, 200);
+        assert_eq!(context.binary_files, 1);
         assert!(context
             .content
             .contains("Binary file changed; content omitted"));
@@ -1530,6 +1575,35 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn refresh_token_changes_with_worktree_index_and_head_state() {
+        let repository = TestRepository::new();
+        let service = GitService::open(&repository.path).expect("valid repository");
+        let clean = service.refresh_token().expect("clean token");
+        assert_eq!(clean, service.refresh_token().expect("stable clean token"));
+
+        fs::write(repository.path.join("tracked.txt"), "worktree\n")
+            .expect("write worktree version");
+        let worktree = service.refresh_token().expect("worktree token");
+        assert_ne!(worktree, clean);
+
+        fs::write(
+            repository.path.join("tracked.txt"),
+            "worktree\nsecond line\n",
+        )
+        .expect("rewrite modified worktree version");
+        let edited_worktree = service.refresh_token().expect("edited worktree token");
+        assert_ne!(edited_worktree, worktree);
+
+        repository.git(&["add", "--", "tracked.txt"]);
+        let staged = service.refresh_token().expect("staged token");
+        assert_ne!(staged, edited_worktree);
+
+        repository.git(&["commit", "-m", "update tracked file"]);
+        let committed = service.refresh_token().expect("committed token");
+        assert_ne!(committed, staged);
     }
 
     #[test]

@@ -66,6 +66,7 @@ function createWorkspace(overrides: Partial<GitWorkspaceValue> = {}): GitWorkspa
     selectedRepository: snapshot.repository,
     commitMessage: "Ship it",
     busyAction: null,
+    cancellingOperation: false,
     generatingCommitMessage: false,
     notice: null,
     clearNotice: vi.fn(),
@@ -84,6 +85,7 @@ function createWorkspace(overrides: Partial<GitWorkspaceValue> = {}): GitWorkspa
     fetch: vi.fn(),
     pull: vi.fn(),
     stash: vi.fn(),
+    cancelOperation: vi.fn(),
     openTerminal: vi.fn(),
     openExplorer: vi.fn(),
     ...overrides,
@@ -511,6 +513,27 @@ describe("PanelShell", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Authentication failed");
     expect(screen.getByText("Pulling…")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh repository" })).toBeDisabled();
+  });
+
+  it("offers cancellation only for the cancellable Fetch operation", () => {
+    workspace.current = createWorkspace({ busyAction: "fetch" });
+    const rendered = render(<PanelShell />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(workspace.current.cancelOperation).toHaveBeenCalledTimes(1);
+
+    workspace.current = createWorkspace({
+      busyAction: "fetch",
+      cancellingOperation: true,
+    });
+    rendered.rerender(<PanelShell />);
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+
+    workspace.current = createWorkspace({ busyAction: "push" });
+    rendered.rerender(<PanelShell />);
+    expect(
+      screen.queryByRole("button", { name: "Cancel" }),
+    ).not.toBeInTheDocument();
   });
 
   it("dismisses completed success feedback and exposes error copying", () => {

@@ -7,6 +7,12 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   NODE_VERSION: 22.14.0
@@ -15,7 +21,7 @@ env:
 
 jobs:
   release:
-    name: Build and publish Windows MSI
+    name: Build and publish trusted Windows assets
     runs-on: windows-2022
     timeout-minutes: 60
 
@@ -30,8 +36,11 @@ jobs:
         shell: pwsh
         run: |
           $tag = $env:GITHUB_REF_NAME
-          if ($tag -notmatch '^v(.+)$') {
-            throw "Expected a v-prefixed release tag, received '$tag'."
+          if (
+            $tag -notmatch
+              '^v((0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?)$'
+          ) {
+            throw "Expected a v-prefixed SemVer release tag, received '$tag'."
           }
 
           $tagVersion = $Matches[1]
@@ -121,22 +130,45 @@ jobs:
         working-directory: src-tauri
         run: cargo test --locked
 
+      - name: Clean previous MSI bundle output
+        shell: pwsh
+        run: |
+          $workspaceRoot = [System.IO.Path]::GetFullPath(
+            $env:GITHUB_WORKSPACE
+          ).TrimEnd('\') + '\'
+          $bundleDirectory = [System.IO.Path]::GetFullPath(
+            (Join-Path $workspaceRoot "src-tauri/target/release/bundle/msi")
+          )
+          if (
+            -not $bundleDirectory.StartsWith(
+              $workspaceRoot,
+              [System.StringComparison]::OrdinalIgnoreCase
+            ) -or
+            (Split-Path -Leaf $bundleDirectory) -ne "msi"
+          ) {
+            throw "Refusing to clean unexpected bundle path: $bundleDirectory"
+          }
+          if (Test-Path -LiteralPath $bundleDirectory) {
+            Remove-Item -LiteralPath $bundleDirectory -Recurse -Force
+          }
+
       - name: Build release MSI
         run: pnpm tauri build --bundles msi --ci
 
-      - name: Verify MSI and generate checksums
-        id: release_assets
+      - name: Locate tagged-version MSI
+        id: msi_bundle
         shell: pwsh
         run: |
           $releaseVersion = $env:GITHUB_REF_NAME -replace '^v', ''
+          $expectedPattern = "RepoPuck_$($releaseVersion)_*.msi"
           $msiFiles = @(
             Get-ChildItem `
               -LiteralPath "src-tauri/target/release/bundle/msi" `
-              -Filter "RepoPuck_$($releaseVersion)_*.msi" `
+              -Filter $expectedPattern `
               -File
           )
           if ($msiFiles.Count -ne 1) {
-            throw "Expected exactly one v$releaseVersion MSI bundle, found $($msiFiles.Count)."
+            throw "Expected exactly one '$expectedPattern' bundle, found $($msiFiles.Count)."
           }
 
           $builtMsi = $msiFiles[0]
@@ -144,50 +176,89 @@ jobs:
             throw "MSI bundle is empty: $($builtMsi.FullName)"
           }
 
-          $releaseMsiName = "RepoPuck_$($releaseVersion)_windows-x64.msi"
-          $releaseMsiPath = Join-Path $env:GITHUB_WORKSPACE $releaseMsiName
-          Copy-Item -LiteralPath $builtMsi.FullName -Destination $releaseMsiPath
+          "msi_path=$($builtMsi.FullName)" >> $env:GITHUB_OUTPUT
+          $builtMsi | Select-Object FullName, Length
 
-          $digest = (Get-FileHash -LiteralPath $releaseMsiPath -Algorithm SHA256).Hash.ToLowerInvariant()
-          $checksumPath = Join-Path $env:GITHUB_WORKSPACE "SHA256SUMS.txt"
-          "$digest *$releaseMsiName" |
-            Set-Content -LiteralPath $checksumPath -Encoding ascii
+      # Optional Authenticode signing hook:
+      # 1. Store the base64 PFX and password as WINDOWS_CERTIFICATE_BASE64 and
+      #    WINDOWS_CERTIFICATE_PASSWORD repository secrets.
+      # 2. Restore the PFX under RUNNER_TEMP and import it only for this job.
+      # 3. Sign steps.msi_bundle.outputs.msi_path with signtool.exe here.
+      # 4. Remove the temporary certificate before checksums are generated.
+      # Until that is implemented, releases remain deliberately unsigned and
+      # missing secrets never prevent CI or release builds.
+      - name: Report optional code-signing status
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) {
+            Write-Host "No Authenticode certificate configured; continuing with an unsigned MSI."
+          }
+          else {
+            Write-Warning `
+              "A signing certificate secret is present, but Authenticode signing is not enabled yet."
+          }
 
-          $sourceNotesPath = ".github/release-notes/$env:GITHUB_REF_NAME.md"
-          $generatedNotesPath = Join-Path $env:GITHUB_WORKSPACE "release-notes.generated.md"
-          $sourceNotes = Get-Content -LiteralPath $sourceNotesPath -Raw
-          $checksumSection = @(
-            ""
-            "---"
-            ""
-            "## 🔐 SHA-256 / 文件校验"
-            ""
-            "``$releaseMsiName``"
-            ""
-            "``````text"
-            $digest
-            "``````"
-            ""
-            "Use ``SHA256SUMS.txt`` to verify the downloaded MSI. / 请使用 ``SHA256SUMS.txt`` 校验下载的 MSI。"
-          ) -join [Environment]::NewLine
-          ($sourceNotes.TrimEnd() + [Environment]::NewLine + $checksumSection) |
-            Set-Content -LiteralPath $generatedNotesPath -Encoding utf8
+      - name: Smoke test silent MSI install and uninstall
+        shell: pwsh
+        env:
+          MSI_PATH: ${{ steps.msi_bundle.outputs.msi_path }}
+        run: |
+          & ".github/scripts/Test-MsiInstall.ps1" `
+            -MsiPath $env:MSI_PATH `
+            -LogDirectory (Join-Path $env:RUNNER_TEMP "repopuck-msi-smoke")
 
-          "msi_path=$releaseMsiPath" >> $env:GITHUB_OUTPUT
-          "checksum_path=$checksumPath" >> $env:GITHUB_OUTPUT
-          "generated_notes_path=$generatedNotesPath" >> $env:GITHUB_OUTPUT
+      - name: Upload MSI smoke-test logs on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: repopuck-release-msi-smoke-logs-${{ github.sha }}
+          path: ${{ runner.temp }}/repopuck-msi-smoke/*.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Prepare release assets, checksums, and WinGet candidate
+        id: release_assets
+        shell: pwsh
+        env:
+          BUILT_MSI_PATH: ${{ steps.msi_bundle.outputs.msi_path }}
+          RELEASE_NOTES_PATH: ${{ steps.release_metadata.outputs.notes_path }}
+        run: |
+          $releaseVersion = $env:GITHUB_REF_NAME -replace '^v', ''
+          & ".github/scripts/New-ReleaseAssets.ps1" `
+            -MsiPath $env:BUILT_MSI_PATH `
+            -PortableExePath "src-tauri/target/release/repopuck.exe" `
+            -Version $releaseVersion `
+            -OutputDirectory (Join-Path $env:RUNNER_TEMP "release-assets") `
+            -Repository $env:GITHUB_REPOSITORY `
+            -ReleaseTag $env:GITHUB_REF_NAME `
+            -ReleaseNotesPath $env:RELEASE_NOTES_PATH
+
+      - name: Attest release build provenance
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: |
+            ${{ steps.release_assets.outputs.msi_path }}
+            ${{ steps.release_assets.outputs.portable_zip_path }}
+            ${{ steps.release_assets.outputs.winget_manifest_zip_path }}
+            ${{ steps.release_assets.outputs.checksum_path }}
 
       - name: Publish GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           MSI_PATH: ${{ steps.release_assets.outputs.msi_path }}
+          PORTABLE_ZIP_PATH: ${{ steps.release_assets.outputs.portable_zip_path }}
+          WINGET_MANIFEST_ZIP_PATH: ${{ steps.release_assets.outputs.winget_manifest_zip_path }}
           CHECKSUM_PATH: ${{ steps.release_assets.outputs.checksum_path }}
           RELEASE_NOTES_PATH: ${{ steps.release_assets.outputs.generated_notes_path }}
           RELEASE_TITLE: ${{ steps.release_metadata.outputs.release_title }}
         run: |
           gh release create $env:GITHUB_REF_NAME `
             $env:MSI_PATH `
+            $env:PORTABLE_ZIP_PATH `
+            $env:WINGET_MANIFEST_ZIP_PATH `
             $env:CHECKSUM_PATH `
             --verify-tag `
             --latest `

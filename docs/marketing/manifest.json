@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "generatedAt": "2026-07-27",
+  "generator": "docs/marketing/Build-MarketingAssets.ps1",
+  "exports": [
+    {
+      "path": "docs/images/repopuck-social-preview.png",
+      "format": "png",
+      "width": 1280,
+      "height": 640,
+      "purpose": "GitHub social preview",
+      "exactCopy": [
+        "RepoPuck",
+        "Git, one click away.",
+        "Stay in flow. Ship the change.",
+        "Stage",
+        "Commit",
+        "Push",
+        "Windows 10 & 11",
+        "Open source",
+        "No GitHub login",
+        "MIT · Tauri · Rust"
+      ]
+    },
+    {
+      "path": "docs/images/repopuck-workflow-demo.gif",
+      "format": "gif",
+      "width": 960,
+      "height": 540,
+      "frames": 5,
+      "purpose": "README workflow walkthrough"
+    }
+  ],
+  "sources": [
+    "src-tauri/icons/128x128.png",
+    "docs/qa/v020/puck-launcher.png",
+    "docs/qa/repopuck-panel-success.png",
+    "docs/qa/repopuck-panel-clean.png"
+  ],
+  "privacy": "All product captures use fictional repository data and contain no credentials, private paths, remotes, email addresses, or private source code."
+}

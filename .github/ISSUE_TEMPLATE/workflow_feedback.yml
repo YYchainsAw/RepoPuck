@@ -1,0 +1,92 @@
+name: "🧭 工作流反馈 / Workflow feedback"
+description: "分享真实 Git 使用过程、阻力和改进机会 / Share a real Git workflow and its friction"
+title: "[Workflow]: "
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        这不是传统的功能许愿单。我们希望了解你如何真实地完成一次提交，以便判断 RepoPuck 应该简化什么、保持什么。
+
+        This is not a conventional feature wishlist. Tell us how you really complete a commit so we can simplify the right parts.
+
+  - type: dropdown
+    id: experience
+    attributes:
+      label: "你的 Git 使用经验 / Git experience"
+      options:
+        - "刚开始使用 / Beginner"
+        - "日常使用 / Regular user"
+        - "熟练使用 / Advanced user"
+        - "团队流程维护者 / Team workflow maintainer"
+    validations:
+      required: true
+
+  - type: textarea
+    id: scenario
+    attributes:
+      label: "使用场景 / Scenario"
+      description: "你正在做什么、多久提交一次、通常有多少变更？/ What are you doing, how often do you commit, and how many files usually change?"
+      placeholder: "例如：在 Windows 上编辑项目，每小时提交…… / Example: I edit a project on Windows and commit ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-flow
+    attributes:
+      label: "当前完整流程 / Current end-to-end flow"
+      description: "从完成一次修改到确认远端收到提交 / From finishing an edit to confirming the remote received it"
+      placeholder: |
+        1. …
+        2. …
+        3. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: friction
+    attributes:
+      label: "最影响你的环节 / Biggest friction"
+      description: "请只选最重要的 1–2 个问题 / Focus on the one or two most important problems"
+      placeholder: "我最容易被打断或出错的地方是…… / The place I lose the most time or make mistakes is ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: repopuck-use
+    attributes:
+      label: "RepoPuck 在流程中的位置 / Where RepoPuck fits"
+      description: "已经使用 RepoPuck 的用户请说明哪些步骤有效、哪些无效；尚未使用也可以填写 / Existing and prospective users are both welcome"
+      placeholder: "RepoPuck 可以替代/已经替代……，但仍然…… / RepoPuck could replace/already replaces ..., but ..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: "最希望改进的方向 / Most valuable improvement"
+      options:
+        - "更快查看和选择变更 / Faster change review and selection"
+        - "更安全地提交和推送 / Safer commit and push"
+        - "更可靠的桌面入口 / More reliable desktop entry"
+        - "更清晰的状态与错误反馈 / Clearer status and errors"
+        - "更低的资源占用 / Lower resource usage"
+        - "更好的键盘与无障碍体验 / Better keyboard and accessibility"
+        - "其他 / Other"
+    validations:
+      required: true
+
+  - type: textarea
+    id: success
+    attributes:
+      label: "怎样算真正解决 / Definition of success"
+      placeholder: "如果改进有效，我将能够…… / If this works, I will be able to ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: "其他信息 / Additional context"
+      description: "可附截图或录屏；请移除仓库地址、凭据和个人信息 / Attach sanitized screenshots or recordings if useful"

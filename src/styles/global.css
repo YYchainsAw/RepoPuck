@@ -573,6 +573,16 @@ html[data-window-view="puck"][data-shell-mode="top-drawer"] #root {
   padding: 6px 16px;
 }
 
+.busy-status > button {
+  margin-left: auto;
+}
+
+.busy-elapsed {
+  color: var(--panel-muted);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
 .changes-scroll {
   flex: 1 1 auto;
   min-height: 0;
@@ -620,6 +630,8 @@ html[data-window-view="puck"][data-shell-mode="top-drawer"] #root {
 .change-row {
   align-items: center;
   border-top: 1px solid var(--panel-border);
+  contain-intrinsic-block-size: 45px;
+  content-visibility: auto;
   display: grid;
   gap: 8px;
   grid-template-columns: 18px 18px minmax(0, 1fr) 14px auto auto;

@@ -30,6 +30,7 @@ export interface GitCopy {
   sensitiveFilesExcluded(count: number): string;
   generated(details: string[]): string;
   actionFailed(action: GitAction): string;
+  commitSucceededPushFailed(detail: string): string;
 }
 
 const en: GitCopy = {
@@ -70,6 +71,8 @@ const en: GitCopy = {
       ? `AI commit message generated. ${details.join(" ")}`
       : "AI commit message generated.",
   actionFailed: (action: GitAction) => `${action} failed`,
+  commitSucceededPushFailed: (detail: string) =>
+    `Commit succeeded, but Push failed. You can retry Push. ${detail}`,
 };
 
 const zhCN: GitCopy = {
@@ -110,6 +113,8 @@ const zhCN: GitCopy = {
       : "AI 提交信息已生成。",
   actionFailed: (action: GitAction) =>
     `${actionLabelsZhCN[action] ?? action}失败`,
+  commitSucceededPushFailed: (detail: string) =>
+    `提交成功，推送失败，可重试推送。${detail}`,
 };
 
 const actionLabelsZhCN: Record<GitAction, string> = {
@@ -210,6 +215,8 @@ const exactMessagesZhCN: Record<string, string> = {
   "Could not open Explorer": "无法打开文件资源管理器",
   "Save an AI API key in Settings before generating":
     "请先在设置中保存 AI API 密钥",
+  "Save or confirm an AI API key for this provider in Settings before generating":
+    "请先在设置中为当前 AI 服务保存或确认 API 密钥",
   "Stored AI API key is invalid; save it again":
     "已保存的 AI API 密钥无效，请重新保存",
   "AI provider request timed out": "AI 服务请求超时",

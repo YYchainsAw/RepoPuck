@@ -6,17 +6,18 @@ use reqwest::{
     StatusCode, Url,
 };
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, WebviewWindow};
 
 use crate::{
-    commands::RepositoryState,
+    commands::{require_panel, RepositoryState},
     git::{model::OperationResult, service::StagedAiContext},
 };
 
 const MAX_API_KEY_BYTES: usize = 2_048;
 const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 const MAX_COMMIT_MESSAGE_CHARS: usize = 72;
-const CREDENTIAL_TARGET: &str = "RepoPuck/AICommitApiKey";
+const LEGACY_CREDENTIAL_TARGET: &str = "RepoPuck/AICommitApiKey";
+const CREDENTIAL_TARGET_PREFIX: &str = "RepoPuck/AICommitApiKey/v2/";
 const ALLOWED_COMMIT_TYPES: &[&str] = &[
     "feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert",
 ];
@@ -25,6 +26,18 @@ const ALLOWED_COMMIT_TYPES: &[&str] = &[
 #[serde(rename_all = "camelCase")]
 pub struct AiKeyStatus {
     pub configured: bool,
+    pub legacy_configured: bool,
+    pub provider_host: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiContextSummary {
+    pub included_files: usize,
+    pub approximate_bytes: usize,
+    pub binary_files: usize,
+    pub truncated: bool,
+    pub excluded_files: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -49,9 +62,16 @@ pub struct GeneratedCommitMessage {
 #[derive(Debug)]
 struct ValidatedRequest {
     endpoint: Url,
+    credential_target: String,
     model: String,
     language: CommitLanguage,
     prefix: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AiProviderIdentity {
+    display_host: String,
+    credential_target: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,15 +108,31 @@ impl Drop for SecretKey {
 }
 
 #[tauri::command]
-pub fn get_ai_key_status() -> Result<AiKeyStatus, String> {
-    credential_store::read().map(|key| AiKeyStatus {
-        configured: key.is_some(),
+pub fn get_ai_key_status(base_url: String, window: WebviewWindow) -> Result<AiKeyStatus, String> {
+    require_panel(&window)?;
+    let provider = provider_identity_from_base_url(&base_url)?;
+    let configured = credential_store::read(&provider.credential_target)?.is_some();
+    let legacy_configured = credential_store::read(LEGACY_CREDENTIAL_TARGET)?.is_some();
+    Ok(AiKeyStatus {
+        configured,
+        legacy_configured,
+        provider_host: provider.display_host,
     })
 }
 
 #[tauri::command]
-pub fn save_ai_api_key(api_key: String) -> OperationResult {
-    let result = SecretKey::new(api_key.into_bytes()).and_then(|key| credential_store::write(&key));
+pub fn save_ai_api_key(
+    base_url: String,
+    api_key: String,
+    window: WebviewWindow,
+) -> OperationResult {
+    if let Err(message) = require_panel(&window) {
+        return OperationResult::failure(message);
+    }
+    let result = SecretKey::new(api_key.into_bytes()).and_then(|key| {
+        let provider = provider_identity_from_base_url(&base_url)?;
+        save_provider_api_key(&provider.credential_target, &key, credential_store::write)
+    });
     match result {
         Ok(()) => OperationResult::success("AI API key saved securely"),
         Err(message) => OperationResult::failure(message),
@@ -104,35 +140,71 @@ pub fn save_ai_api_key(api_key: String) -> OperationResult {
 }
 
 #[tauri::command]
-pub fn delete_ai_api_key() -> OperationResult {
-    match credential_store::delete() {
+pub fn delete_ai_api_key(base_url: String, window: WebviewWindow) -> OperationResult {
+    if let Err(message) = require_panel(&window) {
+        return OperationResult::failure(message);
+    }
+    let result = provider_identity_from_base_url(&base_url)
+        .and_then(|provider| credential_store::delete(&provider.credential_target));
+    match result {
         Ok(()) => OperationResult::success("AI API key removed"),
         Err(message) => OperationResult::failure(message),
     }
 }
 
 #[tauri::command]
+pub fn migrate_legacy_ai_api_key(base_url: String, window: WebviewWindow) -> OperationResult {
+    if let Err(message) = require_panel(&window) {
+        return OperationResult::failure(message);
+    }
+    let result = provider_identity_from_base_url(&base_url).and_then(|provider| {
+        migrate_legacy_api_key(
+            &provider.credential_target,
+            credential_store::read,
+            credential_store::write,
+            credential_store::delete,
+        )
+    });
+    match result {
+        Ok(()) => OperationResult::success("AI API key confirmed for this provider"),
+        Err(message) => OperationResult::failure(message),
+    }
+}
+
+#[tauri::command]
+pub async fn get_ai_context_summary(
+    app: AppHandle,
+    window: WebviewWindow,
+) -> Result<AiContextSummary, String> {
+    require_panel(&window)?;
+    let context = collect_staged_context(&app).await?;
+    Ok(AiContextSummary {
+        included_files: context.included_files,
+        approximate_bytes: context.content.len(),
+        binary_files: context.binary_files,
+        truncated: context.truncated,
+        excluded_files: context.excluded_files,
+    })
+}
+
+#[tauri::command]
 pub async fn generate_commit_message(
     request: GenerateCommitMessageRequest,
     app: AppHandle,
+    window: WebviewWindow,
 ) -> Result<GeneratedCommitMessage, String> {
+    require_panel(&window)?;
     let request = ValidatedRequest::try_from(request)?;
     let selection_generation = app.state::<RepositoryState>().selection_generation();
-    let collection_app = app.clone();
-    let context = tauri::async_runtime::spawn_blocking(move || {
-        collection_app
-            .state::<RepositoryState>()
-            .with_service(|service| service.staged_diff_for_ai())
-    })
-    .await
-    .map_err(|_| "Staged changes could not be collected".to_owned())??;
+    let context = collect_staged_context(&app).await?;
 
     if app.state::<RepositoryState>().selection_generation() != selection_generation {
         return Err("Repository changed while staged changes were being collected".to_owned());
     }
 
-    let api_key = credential_store::read()?
-        .ok_or_else(|| "Save an AI API key in Settings before generating".to_owned())?;
+    let api_key = credential_store::read(&request.credential_target)?.ok_or_else(|| {
+        "Save or confirm an AI API key for this provider in Settings before generating".to_owned()
+    })?;
     let subject = request_subject(&request, &context, &api_key).await?;
 
     if app.state::<RepositoryState>().selection_generation() != selection_generation {
@@ -147,11 +219,43 @@ pub async fn generate_commit_message(
     })
 }
 
+fn save_provider_api_key(
+    credential_target: &str,
+    key: &SecretKey,
+    write: impl FnOnce(&str, &SecretKey) -> Result<(), String>,
+) -> Result<(), String> {
+    write(credential_target, key)
+}
+
+fn migrate_legacy_api_key(
+    credential_target: &str,
+    read: impl FnOnce(&str) -> Result<Option<SecretKey>, String>,
+    write: impl FnOnce(&str, &SecretKey) -> Result<(), String>,
+    delete: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    let key = read(LEGACY_CREDENTIAL_TARGET)?
+        .ok_or_else(|| "No legacy AI API key is available to confirm".to_owned())?;
+    write(credential_target, &key)?;
+    delete(LEGACY_CREDENTIAL_TARGET)
+}
+
+async fn collect_staged_context(app: &AppHandle) -> Result<StagedAiContext, String> {
+    let collection_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        collection_app
+            .state::<RepositoryState>()
+            .with_service(|service| service.staged_diff_for_ai())
+    })
+    .await
+    .map_err(|_| "Staged changes could not be collected".to_owned())?
+}
+
 impl TryFrom<GenerateCommitMessageRequest> for ValidatedRequest {
     type Error = String;
 
     fn try_from(value: GenerateCommitMessageRequest) -> Result<Self, Self::Error> {
         let endpoint = chat_completions_url(&value.base_url)?;
+        let provider = provider_identity(&endpoint)?;
         let model = value.model.trim();
         if model.is_empty()
             || model.len() > 128
@@ -171,11 +275,62 @@ impl TryFrom<GenerateCommitMessageRequest> for ValidatedRequest {
         }
         Ok(Self {
             endpoint,
+            credential_target: provider.credential_target,
             model: model.to_owned(),
             language,
             prefix,
         })
     }
+}
+
+fn provider_identity_from_base_url(base_url: &str) -> Result<AiProviderIdentity, String> {
+    let endpoint = chat_completions_url(base_url)?;
+    provider_identity(&endpoint)
+}
+
+fn provider_identity(url: &Url) -> Result<AiProviderIdentity, String> {
+    let scheme = url.scheme().to_ascii_lowercase();
+    let host = url
+        .host_str()
+        .ok_or_else(|| "AI base URL must include a host".to_owned())?
+        .to_ascii_lowercase();
+    let port = url
+        .port_or_known_default()
+        .ok_or_else(|| "AI base URL must include a valid port".to_owned())?;
+    let authority_host = if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host
+    };
+    let default_port = matches!((scheme.as_str(), port), ("https", 443) | ("http", 80));
+    let display_host = if default_port {
+        authority_host.clone()
+    } else {
+        format!("{authority_host}:{port}")
+    };
+    let normalized_origin = format!("{scheme}://{authority_host}:{port}");
+    Ok(AiProviderIdentity {
+        display_host,
+        credential_target: format!(
+            "{CREDENTIAL_TARGET_PREFIX}{}",
+            encode_credential_component(&normalized_origin)
+        ),
+    })
+}
+
+fn encode_credential_component(value: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-') {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push('_');
+            encoded.push(char::from(HEX[(byte >> 4) as usize]));
+            encoded.push(char::from(HEX[(byte & 0x0f) as usize]));
+        }
+    }
+    encoded
 }
 
 fn chat_completions_url(base_url: &str) -> Result<Url, String> {
@@ -452,7 +607,7 @@ mod credential_store {
         },
     };
 
-    use super::{SecretKey, CREDENTIAL_TARGET, MAX_API_KEY_BYTES};
+    use super::{SecretKey, MAX_API_KEY_BYTES};
 
     struct CredentialBuffer(*mut CREDENTIALW);
 
@@ -464,8 +619,8 @@ mod credential_store {
         }
     }
 
-    pub(super) fn read() -> Result<Option<SecretKey>, String> {
-        let target = wide(CREDENTIAL_TARGET);
+    pub(super) fn read(target: &str) -> Result<Option<SecretKey>, String> {
+        let target = wide(target);
         let mut credential = ptr::null_mut();
         let success =
             unsafe { CredReadW(target.as_ptr(), CRED_TYPE_GENERIC, 0, &mut credential) } != 0;
@@ -493,8 +648,8 @@ mod credential_store {
         SecretKey::new(bytes).map(Some)
     }
 
-    pub(super) fn write(key: &SecretKey) -> Result<(), String> {
-        let mut target = wide(CREDENTIAL_TARGET);
+    pub(super) fn write(target: &str, key: &SecretKey) -> Result<(), String> {
+        let mut target = wide(target);
         let mut username = wide("RepoPuck");
         let credential = CREDENTIALW {
             Type: CRED_TYPE_GENERIC,
@@ -512,8 +667,8 @@ mod credential_store {
         }
     }
 
-    pub(super) fn delete() -> Result<(), String> {
-        let target = wide(CREDENTIAL_TARGET);
+    pub(super) fn delete(target: &str) -> Result<(), String> {
+        let target = wide(target);
         if unsafe { CredDeleteW(target.as_ptr(), CRED_TYPE_GENERIC, 0) } != 0 {
             return Ok(());
         }
@@ -533,27 +688,31 @@ mod credential_store {
 mod credential_store {
     use super::SecretKey;
 
-    pub(super) fn read() -> Result<Option<SecretKey>, String> {
+    pub(super) fn read(_target: &str) -> Result<Option<SecretKey>, String> {
         Err("Secure AI API key storage is supported on Windows only".to_owned())
     }
 
-    pub(super) fn write(_key: &SecretKey) -> Result<(), String> {
+    pub(super) fn write(_target: &str, _key: &SecretKey) -> Result<(), String> {
         Err("Secure AI API key storage is supported on Windows only".to_owned())
     }
 
-    pub(super) fn delete() -> Result<(), String> {
+    pub(super) fn delete(_target: &str) -> Result<(), String> {
         Err("Secure AI API key storage is supported on Windows only".to_owned())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::RefCell, collections::HashMap};
+
     use serde_json::json;
 
     use super::{
-        chat_completions_url, conventional_prefix, format_commit_message, normalize_subject,
-        response_content, safe_http_status, truncate_subject, valid_scope, CommitLanguage,
-        GenerateCommitMessageRequest, StatusCode, ValidatedRequest, MAX_COMMIT_MESSAGE_CHARS,
+        chat_completions_url, conventional_prefix, format_commit_message, migrate_legacy_api_key,
+        normalize_subject, provider_identity_from_base_url, response_content, safe_http_status,
+        save_provider_api_key, truncate_subject, valid_scope, CommitLanguage,
+        GenerateCommitMessageRequest, SecretKey, StatusCode, ValidatedRequest,
+        LEGACY_CREDENTIAL_TARGET, MAX_COMMIT_MESSAGE_CHARS,
     };
 
     #[test]
@@ -583,8 +742,104 @@ mod tests {
             request.endpoint.as_str(),
             "https://api.example.com/v1/chat/completions"
         );
+        assert!(request
+            .credential_target
+            .ends_with("https_3A_2F_2Fapi.example.com_3A443"));
         assert_eq!(request.language, CommitLanguage::Chinese);
         assert_eq!(request.prefix, "feat(ui):");
+    }
+
+    #[test]
+    fn isolates_credentials_by_normalized_provider_origin() {
+        let first =
+            provider_identity_from_base_url("https://API.Example.com:443/v1").expect("provider");
+        let same_host =
+            provider_identity_from_base_url("https://api.example.com/other/").expect("provider");
+        let other_port =
+            provider_identity_from_base_url("https://api.example.com:8443/v1").expect("provider");
+
+        assert_eq!(first.display_host, "api.example.com");
+        assert_eq!(first.credential_target, same_host.credential_target);
+        assert_ne!(first.credential_target, other_port.credential_target);
+        assert_eq!(other_port.display_host, "api.example.com:8443");
+    }
+
+    #[test]
+    fn local_http_and_https_providers_never_share_credentials() {
+        let http =
+            provider_identity_from_base_url("http://localhost:11434/v1").expect("local provider");
+        let https =
+            provider_identity_from_base_url("https://localhost:11434/v1").expect("local provider");
+
+        assert_ne!(http.credential_target, https.credential_target);
+        assert_eq!(http.display_host, "localhost:11434");
+    }
+
+    #[test]
+    fn saving_a_provider_key_preserves_the_legacy_credential() {
+        let credentials = RefCell::new(HashMap::from([(
+            LEGACY_CREDENTIAL_TARGET.to_owned(),
+            b"legacy-secret".to_vec(),
+        )]));
+        let provider_target = "RepoPuck/AICommitApiKey/v2/provider";
+        let provider_key = SecretKey::new(b"provider-secret".to_vec()).unwrap();
+
+        save_provider_api_key(provider_target, &provider_key, |target, key| {
+            credentials
+                .borrow_mut()
+                .insert(target.to_owned(), key.expose().to_vec());
+            Ok(())
+        })
+        .unwrap();
+
+        let credentials = credentials.borrow();
+        assert_eq!(
+            credentials.get(LEGACY_CREDENTIAL_TARGET),
+            Some(&b"legacy-secret".to_vec())
+        );
+        assert_eq!(
+            credentials.get(provider_target),
+            Some(&b"provider-secret".to_vec())
+        );
+    }
+
+    #[test]
+    fn explicit_migration_copies_then_deletes_the_legacy_credential() {
+        let credentials = RefCell::new(HashMap::from([(
+            LEGACY_CREDENTIAL_TARGET.to_owned(),
+            b"legacy-secret".to_vec(),
+        )]));
+        let provider_target = "RepoPuck/AICommitApiKey/v2/provider";
+
+        migrate_legacy_api_key(
+            provider_target,
+            |target| {
+                credentials
+                    .borrow()
+                    .get(target)
+                    .cloned()
+                    .map(SecretKey::new)
+                    .transpose()
+            },
+            |target, key| {
+                credentials
+                    .borrow_mut()
+                    .insert(target.to_owned(), key.expose().to_vec());
+                Ok(())
+            },
+            |target| {
+                credentials.borrow_mut().remove(target);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        let credentials = credentials.borrow();
+        assert!(!credentials.contains_key(LEGACY_CREDENTIAL_TARGET));
+        assert_eq!(
+            credentials.get(provider_target),
+            Some(&b"legacy-secret".to_vec())
+        );
     }
 
     #[test]

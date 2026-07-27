@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RepoPuck workflow demo frame</title>
+    <style>
+      :root {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
+          Helvetica, Arial, sans-serif;
+        color: #f0f6fc;
+        background: #0d1117;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 960px;
+        height: 540px;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      body {
+        position: relative;
+        display: grid;
+        grid-template-columns: 43% 57%;
+        background:
+          radial-gradient(circle at 22% 16%, rgba(47, 129, 247, 0.2), transparent 32%),
+          radial-gradient(circle at 92% 92%, rgba(31, 136, 61, 0.22), transparent 38%),
+          #0d1117;
+      }
+
+      body::after {
+        position: absolute;
+        inset: 0;
+        border: 1px solid rgba(240, 246, 252, 0.08);
+        content: "";
+        pointer-events: none;
+      }
+
+      .copy {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 42px 34px 42px 50px;
+      }
+
+      .brand {
+        position: absolute;
+        top: 34px;
+        left: 48px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: #f0f6fc;
+        font-size: 23px;
+        font-weight: 750;
+      }
+
+      .brand img {
+        width: 42px;
+        height: 42px;
+        border-radius: 12px;
+      }
+
+      .step {
+        margin-bottom: 18px;
+        color: #56d364;
+        font-size: 15px;
+        font-weight: 750;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        max-width: 330px;
+        margin: 0 0 20px;
+        font-size: 43px;
+        letter-spacing: -1.8px;
+        line-height: 1.04;
+      }
+
+      p {
+        max-width: 330px;
+        margin: 0;
+        color: #b1bac4;
+        font-size: 19px;
+        line-height: 1.5;
+      }
+
+      .stage {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+      }
+
+      .stage::before {
+        position: absolute;
+        width: 450px;
+        height: 450px;
+        border: 1px solid rgba(240, 246, 252, 0.08);
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.025);
+        content: "";
+      }
+
+      .panel {
+        position: relative;
+        width: 286px;
+        height: 490px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.5);
+        border-radius: 17px;
+        background: #ffffff;
+        box-shadow:
+          0 26px 55px rgba(0, 0, 0, 0.45),
+          0 0 0 7px rgba(255, 255, 255, 0.06);
+      }
+
+      .panel img {
+        display: block;
+        width: 286px;
+        height: auto;
+      }
+
+      .launcher {
+        position: relative;
+        width: 164px;
+        height: 164px;
+        border: 8px solid rgba(255, 255, 255, 0.9);
+        border-radius: 50%;
+        box-shadow:
+          0 24px 60px rgba(0, 0, 0, 0.45),
+          0 0 0 10px rgba(31, 136, 61, 0.15);
+      }
+
+      .launcher img {
+        width: 100%;
+        height: 100%;
+      }
+
+      .cursor {
+        position: absolute;
+        right: 126px;
+        bottom: 121px;
+        width: 28px;
+        height: 34px;
+        filter: drop-shadow(0 3px 2px rgba(0, 0, 0, 0.5));
+      }
+
+      .cursor::before {
+        display: block;
+        width: 0;
+        height: 0;
+        border-top: 26px solid #ffffff;
+        border-right: 17px solid transparent;
+        content: "";
+        transform: rotate(-18deg);
+      }
+
+      .focus {
+        position: absolute;
+        z-index: 2;
+        display: none;
+        border: 3px solid #2f81f7;
+        border-radius: 10px;
+        box-shadow: 0 0 0 5px rgba(47, 129, 247, 0.23);
+        pointer-events: none;
+      }
+
+      .focus.files {
+        top: 130px;
+        left: 123px;
+        width: 287px;
+        height: 183px;
+      }
+
+      .focus.message {
+        right: 126px;
+        bottom: 73px;
+        width: 252px;
+        height: 32px;
+      }
+
+      .focus.actions {
+        right: 126px;
+        bottom: 26px;
+        width: 252px;
+        height: 38px;
+        border-color: #3fb950;
+        box-shadow: 0 0 0 5px rgba(63, 185, 80, 0.23);
+      }
+
+      body[data-step="2"] .focus.files,
+      body[data-step="3"] .focus.message,
+      body[data-step="4"] .focus.actions {
+        display: block;
+      }
+
+      .progress {
+        position: absolute;
+        left: 50px;
+        bottom: 34px;
+        display: flex;
+        gap: 8px;
+      }
+
+      .progress span {
+        width: 30px;
+        height: 4px;
+        border-radius: 999px;
+        background: #30363d;
+      }
+
+      .progress span.active {
+        background: #2f81f7;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="brand">
+      <img src="../../src-tauri/icons/128x128.png" alt="" />
+      RepoPuck
+    </div>
+
+    <main class="copy">
+      <div class="step" id="step-label"></div>
+      <h1 id="headline"></h1>
+      <p id="description"></p>
+    </main>
+
+    <section class="stage" aria-label="RepoPuck workflow preview">
+      <div class="launcher" id="launcher">
+        <img src="../qa/v020/puck-launcher.png" alt="" />
+      </div>
+      <div class="panel" id="panel">
+        <img id="panel-image" src="../qa/repopuck-panel-success.png" alt="" />
+      </div>
+      <div class="focus files"></div>
+      <div class="focus message"></div>
+      <div class="focus actions"></div>
+      <div class="cursor" id="cursor"></div>
+    </section>
+
+    <div class="progress" id="progress"></div>
+
+    <script>
+      const steps = [
+        {
+          headline: "Open from the desktop",
+          description:
+            "Keep Git one click away with a floating puck, top island, or hidden drawer.",
+        },
+        {
+          headline: "Choose the changes",
+          description:
+            "Stage only the files that belong in this commit. Unversioned files stay separate.",
+        },
+        {
+          headline: "Write or generate",
+          description:
+            "Type the message yourself or use an optional AI draft. Nothing runs automatically.",
+        },
+        {
+          headline: "Commit your way",
+          description:
+            "Commit locally or choose Commit & Push. The actions remain separate and explicit.",
+        },
+        {
+          headline: "Done. Stay in flow.",
+          description:
+            "The working tree is clean, and RepoPuck is ready for the next small change.",
+        },
+      ];
+
+      const requestedStep = Number(
+        new URLSearchParams(window.location.search).get("step") || "1",
+      );
+      const step = Math.min(Math.max(requestedStep, 1), steps.length);
+      const data = steps[step - 1];
+
+      document.body.dataset.step = String(step);
+      document.getElementById("step-label").textContent =
+        `Step ${step} of ${steps.length}`;
+      document.getElementById("headline").textContent = data.headline;
+      document.getElementById("description").textContent = data.description;
+
+      const launcher = document.getElementById("launcher");
+      const panel = document.getElementById("panel");
+      const cursor = document.getElementById("cursor");
+      const panelImage = document.getElementById("panel-image");
+
+      if (step === 1) {
+        panel.style.display = "none";
+      } else {
+        launcher.style.display = "none";
+        cursor.style.display = "none";
+      }
+
+      if (step === 5) {
+        panelImage.src = "../qa/repopuck-panel-clean.png";
+      }
+
+      const progress = document.getElementById("progress");
+      for (let index = 1; index <= steps.length; index += 1) {
+        const item = document.createElement("span");
+        if (index === step) item.className = "active";
+        progress.appendChild(item);
+      }
+    </script>
+  </body>
+</html>

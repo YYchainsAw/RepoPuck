@@ -11,6 +11,7 @@ import { getGitCopy, localizeGitMessage } from "../../i18n/git";
 import { createGitClient } from "./client";
 import type {
   AiCommitPreferences,
+  CommitAndPushResult,
   GenerateCommitMessageResult,
   GitClient,
   OperationResult,
@@ -29,6 +30,7 @@ export interface GitProviderProps extends PropsWithChildren {
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 10_000;
+const FULL_REFRESH_INTERVAL_MS = 60_000;
 
 const getErrorMessage = (reason: unknown) =>
   reason instanceof Error ? reason.message : String(reason);
@@ -122,7 +124,7 @@ const normalizeGameMetadata = (
 interface RefreshFlight {
   client: GitClient;
   generation: number;
-  promise: Promise<void>;
+  promise: Promise<boolean>;
 }
 
 interface MutationFlight {
@@ -148,9 +150,17 @@ interface PendingRefresh {
   generation: number;
 }
 
+interface RefreshTokenState {
+  client: GitClient;
+  generation: number;
+  value: string;
+  fullRefreshAt: number;
+}
+
 type Feedback =
   | { kind: "message"; message: string }
   | { kind: "actionFailed"; action: GitAction }
+  | { kind: "commitPushPartialFailure"; message: string }
   | {
       kind: "aiGenerated";
       truncated: boolean;
@@ -163,6 +173,11 @@ const formatFeedback = (
 ): string | null => {
   if (!feedback) return null;
   const copy = getGitCopy(language);
+  if (feedback.kind === "commitPushPartialFailure") {
+    return copy.commitSucceededPushFailed(
+      localizeGitMessage(feedback.message, language),
+    );
+  }
   if (feedback.kind === "message") {
     return localizeGitMessage(feedback.message, language);
   }
@@ -178,6 +193,15 @@ const formatFeedback = (
   ].filter((detail): detail is string => detail !== null);
   return copy.generated(details);
 };
+
+const isCommitAndPushResult = (
+  result: OperationResult,
+): result is CommitAndPushResult =>
+  "committed" in result &&
+  "pushed" in result &&
+  "stage" in result &&
+  typeof result.committed === "boolean" &&
+  typeof result.pushed === "boolean";
 
 export function GitProvider({
   children,
@@ -196,6 +220,7 @@ export function GitProvider({
   >(null);
   const [commitMessage, setCommitMessage] = useState("");
   const [busyAction, setBusyAction] = useState<GitAction | null>(null);
+  const [cancellingOperation, setCancellingOperation] = useState(false);
   const [generatingCommitMessage, setGeneratingCommitMessage] = useState(false);
   const [noticeFeedback, setNoticeFeedback] = useState<Feedback | null>(null);
   const [actionErrorFeedback, setActionErrorFeedback] =
@@ -203,18 +228,21 @@ export function GitProvider({
   const [refreshErrorFeedback, setRefreshErrorFeedback] =
     useState<Feedback | null>(null);
   const mutationRef = useRef<MutationFlight | null>(null);
+  const cancellationRequestRef = useRef<symbol | null>(null);
   const aiGenerationRef = useRef<AiGenerationFlight | null>(null);
   const mountedRef = useRef(false);
   const generationRef = useRef(0);
   const inFlightRef = useRef<RefreshFlight | null>(null);
   const pendingRefreshRef = useRef<PendingRefresh | null>(null);
+  const refreshTokenRef = useRef<RefreshTokenState | null>(null);
+  const tokenCheckInFlightRef = useRef(false);
   const clientRef = useRef(client);
   const visibleRef = useRef(visible);
   clientRef.current = client;
   visibleRef.current = visible;
 
   const performRefresh = useCallback(
-    (targetClient: GitClient, generation: number): Promise<void> => {
+    (targetClient: GitClient, generation: number): Promise<boolean> => {
       const existing = inFlightRef.current;
       if (
         existing?.client === targetClient &&
@@ -231,14 +259,14 @@ export function GitProvider({
       const flight: RefreshFlight = {
         client: targetClient,
         generation,
-        promise: Promise.resolve(),
+        promise: Promise.resolve(false),
       };
       flight.promise = Promise.resolve().then(async () => {
         try {
           const nextSnapshot = normalizeGameMetadata(
             await targetClient.getSnapshot(),
           );
-          if (!isCurrent()) return;
+          if (!isCurrent()) return false;
           setSnapshot((current) =>
             snapshotsEqual(current, nextSnapshot) ? current : nextSnapshot,
           );
@@ -248,15 +276,18 @@ export function GitProvider({
               : nextSnapshot.repository,
           );
           setRefreshErrorFeedback(null);
+          return true;
         } catch (reason) {
-          if (!isCurrent()) return;
+          if (!isCurrent()) return false;
           const message = getErrorMessage(reason);
           if (/^No repository is selected[.!]?$/i.test(message)) {
             setSnapshot(null);
             setSelectedRepository(null);
             setRefreshErrorFeedback(null);
+            return true;
           } else {
             setRefreshErrorFeedback({ kind: "message", message });
+            return false;
           }
         } finally {
           if (inFlightRef.current === flight) {
@@ -270,8 +301,72 @@ export function GitProvider({
     [],
   );
 
+  const refreshFromCurrentState = useCallback(
+    async (
+      targetClient: GitClient,
+      generation: number,
+      force: boolean,
+    ): Promise<void> => {
+      if (!targetClient.getRefreshToken) {
+        await performRefresh(targetClient, generation);
+        return;
+      }
+      if (!force && tokenCheckInFlightRef.current) return;
+      if (!force) tokenCheckInFlightRef.current = true;
+
+      let token: string;
+      try {
+        token = await targetClient.getRefreshToken();
+      } catch {
+        await performRefresh(targetClient, generation);
+        return;
+      } finally {
+        if (!force) tokenCheckInFlightRef.current = false;
+      }
+      if (
+        !mountedRef.current ||
+        !visibleRef.current ||
+        clientRef.current !== targetClient ||
+        generationRef.current !== generation
+      ) {
+        return;
+      }
+
+      const cached = refreshTokenRef.current;
+      const fullRefreshDue =
+        !cached ||
+        cached.client !== targetClient ||
+        cached.generation !== generation ||
+        Date.now() - cached.fullRefreshAt >= FULL_REFRESH_INTERVAL_MS;
+      if (!force && !fullRefreshDue && cached.value === token) {
+        return;
+      }
+
+      const refreshed = await performRefresh(targetClient, generation);
+      if (
+        refreshed &&
+        mountedRef.current &&
+        visibleRef.current &&
+        clientRef.current === targetClient &&
+        generationRef.current === generation
+      ) {
+        refreshTokenRef.current = {
+          client: targetClient,
+          generation,
+          value: token,
+          fullRefreshAt: Date.now(),
+        };
+      }
+    },
+    [performRefresh],
+  );
+
   const refresh = useCallback(async (): Promise<void> => {
-    if (!mountedRef.current || !visibleRef.current) {
+    if (
+      !mountedRef.current ||
+      !visibleRef.current ||
+      mutationRef.current
+    ) {
       return;
     }
     const targetClient = clientRef.current;
@@ -296,8 +391,8 @@ export function GitProvider({
       }
       pendingRefreshRef.current = null;
     }
-    await performRefresh(targetClient, generation);
-  }, [performRefresh]);
+    await refreshFromCurrentState(targetClient, generation, true);
+  }, [refreshFromCurrentState]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -306,7 +401,10 @@ export function GitProvider({
       generationRef.current += 1;
       inFlightRef.current = null;
       pendingRefreshRef.current = null;
+      refreshTokenRef.current = null;
+      tokenCheckInFlightRef.current = false;
       mutationRef.current = null;
+      cancellationRequestRef.current = null;
       aiGenerationRef.current = null;
     };
   }, []);
@@ -315,10 +413,14 @@ export function GitProvider({
     generationRef.current += 1;
     const generation = generationRef.current;
     pendingRefreshRef.current = null;
+    refreshTokenRef.current = null;
+    tokenCheckInFlightRef.current = false;
     if (mutationRef.current) {
       mutationRef.current = null;
       setBusyAction(null);
     }
+    cancellationRequestRef.current = null;
+    setCancellingOperation(false);
     if (aiGenerationRef.current) {
       aiGenerationRef.current = null;
       setGeneratingCommitMessage(false);
@@ -327,10 +429,12 @@ export function GitProvider({
     setNoticeFeedback(null);
     if (!visible) return;
 
-    void performRefresh(client, generation);
+    void refreshFromCurrentState(client, generation, true);
 
     const timer = window.setInterval(() => {
-      if (!mutationRef.current) void performRefresh(client, generation);
+      if (!mutationRef.current) {
+        void refreshFromCurrentState(client, generation, false);
+      }
     }, pollIntervalMs);
     return () => {
       window.clearInterval(timer);
@@ -338,7 +442,7 @@ export function GitProvider({
         generationRef.current += 1;
       }
     };
-  }, [client, performRefresh, pollIntervalMs, visible]);
+  }, [client, pollIntervalMs, refreshFromCurrentState, visible]);
 
   const refreshAfterMutation = useCallback(
     async (
@@ -354,10 +458,10 @@ export function GitProvider({
         await existing.promise;
         if (!isCurrent()) return false;
       }
-      await performRefresh(targetClient, generation);
+      await refreshFromCurrentState(targetClient, generation, true);
       return isCurrent();
     },
-    [performRefresh],
+    [refreshFromCurrentState],
   );
 
   const runMutation = useCallback(
@@ -395,6 +499,8 @@ export function GitProvider({
         mutationRef.current?.token === mutation.token;
 
       mutationRef.current = mutation;
+      cancellationRequestRef.current = null;
+      setCancellingOperation(false);
       setBusyAction(action);
       setActionErrorFeedback(null);
       setNoticeFeedback(null);
@@ -404,9 +510,33 @@ export function GitProvider({
         if (!isCurrent()) return false;
 
         if (!result.success) {
-          const feedback: Feedback = result.message
-            ? { kind: "message", message: result.message }
-            : { kind: "actionFailed", action };
+          if (/cancelled/i.test(result.message ?? "")) {
+            setNoticeFeedback(
+              result.message ? { kind: "message", message: result.message } : null,
+            );
+            return false;
+          }
+          const commitCompleted =
+            action === "commitAndPush" &&
+            isCommitAndPushResult(result) &&
+            result.committed;
+          if (
+            commitCompleted &&
+            options.submittedMessage !== undefined
+          ) {
+            setCommitMessage((currentDraft) =>
+              currentDraft === options.submittedMessage ? "" : currentDraft,
+            );
+          }
+          const feedback: Feedback =
+            commitCompleted && result.message
+              ? {
+                  kind: "commitPushPartialFailure",
+                  message: result.message,
+                }
+              : result.message
+                ? { kind: "message", message: result.message }
+                : { kind: "actionFailed", action };
           setActionErrorFeedback(feedback);
           if (options.refreshOnFailure) {
             if (
@@ -444,12 +574,60 @@ export function GitProvider({
       } finally {
         if (isCurrent()) {
           mutationRef.current = null;
+          cancellationRequestRef.current = null;
+          setCancellingOperation(false);
           setBusyAction(null);
         }
       }
     },
     [refreshAfterMutation],
   );
+
+  const cancelOperation = useCallback(async (): Promise<boolean> => {
+    const mutation = mutationRef.current;
+    if (
+      !mutation ||
+      mutation.action !== "fetch" ||
+      cancellationRequestRef.current ||
+      !mountedRef.current ||
+      !visibleRef.current
+    ) {
+      return false;
+    }
+
+    const token = Symbol("cancelGitOperation");
+    cancellationRequestRef.current = token;
+    setCancellingOperation(true);
+    try {
+      const result = await mutation.client.cancelOperation();
+      if (
+        cancellationRequestRef.current !== token ||
+        mutationRef.current?.token !== mutation.token
+      ) {
+        return false;
+      }
+      if (!result.success) {
+        setActionErrorFeedback(
+          result.message
+            ? { kind: "message", message: result.message }
+            : { kind: "actionFailed", action: mutation.action },
+        );
+      }
+      return result.success;
+    } catch (reason) {
+      if (cancellationRequestRef.current !== token) return false;
+      setActionErrorFeedback({
+        kind: "message",
+        message: getErrorMessage(reason),
+      });
+      return false;
+    } finally {
+      if (cancellationRequestRef.current === token) {
+        cancellationRequestRef.current = null;
+        setCancellingOperation(false);
+      }
+    }
+  }, []);
 
   const updateCommitMessage = useCallback((message: string) => {
     if (aiGenerationRef.current) {
@@ -530,6 +708,7 @@ export function GitProvider({
       selectedRepository,
       commitMessage,
       busyAction,
+      cancellingOperation,
       generatingCommitMessage,
       notice,
       clearNotice: () => setNoticeFeedback(null),
@@ -578,6 +757,7 @@ export function GitProvider({
       fetch: () => runMutation("fetch", (targetClient) => targetClient.fetch()),
       pull: () => runMutation("pull", (targetClient) => targetClient.pull()),
       stash: () => runMutation("stash", (targetClient) => targetClient.stash()),
+      cancelOperation,
       openTerminal: () =>
         runMutation("openTerminal", (targetClient) =>
           targetClient.openTerminal(),
@@ -589,6 +769,8 @@ export function GitProvider({
     }),
     [
       busyAction,
+      cancelOperation,
+      cancellingOperation,
       client,
       commitMessage,
       generateCommitMessage,

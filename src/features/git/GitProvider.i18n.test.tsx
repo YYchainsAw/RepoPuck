@@ -5,6 +5,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GitProvider } from "./GitProvider";
 import type {
+  CommitAndPushResult,
   GenerateCommitMessageResult,
   GitClient,
   OperationResult,
@@ -54,6 +55,14 @@ const aiPreferences = {
 
 function createClient(): GitClient {
   const success = async (): Promise<OperationResult> => ({ success: true });
+  const commitAndPushSuccess =
+    async (): Promise<CommitAndPushResult> => ({
+      success: true,
+      committed: true,
+      pushed: true,
+      stage: "complete",
+      message: "Changes committed and pushed",
+    });
   return {
     selectRepository: vi.fn(success),
     getSnapshot: vi.fn(async () => structuredClone(snapshot)),
@@ -69,13 +78,14 @@ function createClient(): GitClient {
     ),
     amendLastCommit: vi.fn(success),
     push: vi.fn(async () => ({ success: true, message: "Changes pushed" })),
-    commitAndPush: vi.fn(success),
+    commitAndPush: vi.fn(commitAndPushSuccess),
     checkout: vi.fn(success),
     switchBranch: vi.fn(success),
     createBranch: vi.fn(success),
     fetch: vi.fn(success),
     pull: vi.fn(success),
     stash: vi.fn(success),
+    cancelOperation: vi.fn(success),
     openTerminal: vi.fn(success),
     openExplorer: vi.fn(success),
   };
@@ -155,5 +165,36 @@ describe("GitProvider localized feedback", () => {
     });
     expect(result.current.error).toContain("Git 索引已锁定");
     expect(result.current.error).toContain("退出代码 128");
+  });
+
+  it("localizes a partial commit-and-push failure without losing its cause", async () => {
+    const client = createClient();
+    vi.mocked(client.commitAndPush).mockResolvedValueOnce({
+      success: false,
+      committed: true,
+      pushed: false,
+      stage: "push",
+      message: "Git authentication failed",
+    });
+    const { result, rerender } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+    act(() => result.current.setCommitMessage("fix: retry push"));
+
+    await act(async () => {
+      await result.current.commitAndPush();
+    });
+    expect(result.current.error).toBe(
+      "Commit succeeded, but Push failed. You can retry Push. Git authentication failed",
+    );
+
+    act(() => {
+      i18nState.language = "zh-CN";
+      rerender();
+    });
+    expect(result.current.error).toBe(
+      "提交成功，推送失败，可重试推送。Git 身份验证失败",
+    );
   });
 });

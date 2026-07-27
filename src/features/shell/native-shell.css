@@ -465,6 +465,51 @@
   color: var(--fgColor-danger, #d1242f);
 }
 
+.api-provider-confirmation {
+  align-items: center;
+  background: var(--bgColor-attention-muted, #fff8c5);
+  border: 1px solid var(--borderColor-attention-muted, #d4a72c66);
+  border-radius: 6px;
+  color: var(--fgColor-default, var(--panel-text));
+  display: flex;
+  font-size: 12px;
+  gap: 10px;
+  justify-content: space-between;
+  line-height: 17px;
+  padding: 9px 10px;
+}
+
+.api-provider-confirmation button {
+  flex: 0 0 auto;
+}
+
+.ai-context-card {
+  background: var(--panel-subtle);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  display: grid;
+  font-size: 12px;
+  gap: 8px;
+  line-height: 18px;
+  padding: 12px;
+}
+
+.ai-context-card > div:first-child,
+.ai-context-summary {
+  display: grid;
+  gap: 2px;
+}
+
+.ai-context-card small,
+.ai-context-card p,
+.ai-context-summary span {
+  color: var(--panel-muted);
+}
+
+.ai-context-card p {
+  margin: 0;
+}
+
 .ai-privacy-notice {
   align-items: start;
   background: var(--panel-surface);
@@ -488,6 +533,11 @@
   .ai-settings-grid,
   .api-key-controls {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .api-provider-confirmation {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .ai-settings-wide {
