@@ -44,11 +44,9 @@ describe("createGitClient", () => {
         baseUrl: "https://api.openai.com/v1",
         model: "gpt-4.1-mini",
         language: "zh-CN",
-        commitType: "feat",
-        scope: "ui",
       }),
     ).resolves.toEqual({
-      message: "feat(ui): 更新暂存的项目文件",
+      message: "fix: 更新暂存的项目文件",
       truncated: false,
       excludedFiles: [],
     });
@@ -68,8 +66,6 @@ describe("createGitClient", () => {
       baseUrl: "https://api.openai.com/v1",
       model: "gpt-4.1-mini",
       language: "en",
-      commitType: "feat",
-      scope: "ui",
     });
     await client.amendLastCommit("Revised commit");
     await client.amendLastCommit();
@@ -99,8 +95,6 @@ describe("createGitClient", () => {
             baseUrl: "https://api.openai.com/v1",
             model: "gpt-4.1-mini",
             language: "en",
-            commitType: "feat",
-            scope: "ui",
           },
         },
       ],

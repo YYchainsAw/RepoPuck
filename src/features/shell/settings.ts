@@ -3,25 +3,11 @@ import { load } from "@tauri-apps/plugin-store";
 export type ThemePreference = "system" | "light" | "dark";
 export type LanguagePreference = "system" | "zh-CN" | "en";
 export type AICommitLanguage = "zh-CN" | "en";
-export type ConventionalCommitType =
-  | "feat"
-  | "fix"
-  | "docs"
-  | "refactor"
-  | "perf"
-  | "test"
-  | "build"
-  | "ci"
-  | "chore"
-  | "style"
-  | "revert";
 
 export interface AICommitPreferences {
   baseUrl: string;
   model: string;
   language: AICommitLanguage;
-  commitType: ConventionalCommitType;
-  scope: string;
 }
 
 export interface ShellSettings {
@@ -51,8 +37,6 @@ export const DEFAULT_AI_COMMIT_PREFERENCES: AICommitPreferences = {
   baseUrl: "https://api.openai.com/v1",
   model: "gpt-4.1-mini",
   language: "zh-CN",
-  commitType: "feat",
-  scope: "",
 };
 
 export const DEFAULT_SHELL_SETTINGS: ShellSettings = {
@@ -70,20 +54,6 @@ const STORE_DEFAULTS: Record<string, unknown> = {
   language: DEFAULT_SHELL_SETTINGS.language,
   aiCommit: DEFAULT_AI_COMMIT_PREFERENCES,
 };
-
-const CONVENTIONAL_COMMIT_TYPES = new Set<ConventionalCommitType>([
-  "feat",
-  "fix",
-  "docs",
-  "refactor",
-  "perf",
-  "test",
-  "build",
-  "ci",
-  "chore",
-  "style",
-  "revert",
-]);
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -128,14 +98,7 @@ export function normalizeAICommitPreferences(value: unknown): AICommitPreference
     candidate.language === "en" || candidate.language === "zh-CN"
       ? candidate.language
       : DEFAULT_AI_COMMIT_PREFERENCES.language;
-  const commitType =
-    typeof candidate.commitType === "string" &&
-    CONVENTIONAL_COMMIT_TYPES.has(candidate.commitType as ConventionalCommitType)
-      ? (candidate.commitType as ConventionalCommitType)
-      : DEFAULT_AI_COMMIT_PREFERENCES.commitType;
-  const scope =
-    typeof candidate.scope === "string" ? candidate.scope.trim().slice(0, 32) : "";
-  return { baseUrl, model, language, commitType, scope };
+  return { baseUrl, model, language };
 }
 
 export function getAICommitPreferences(settings: ShellSettings): AICommitPreferences {

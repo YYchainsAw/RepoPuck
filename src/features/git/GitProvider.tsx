@@ -121,6 +121,21 @@ const normalizeGameMetadata = (
   };
 };
 
+const applyStagingTargets = (
+  snapshot: RepositorySnapshot,
+  targets: ReadonlyMap<string, boolean>,
+): RepositorySnapshot => {
+  if (targets.size === 0) return snapshot;
+  let changed = false;
+  const changes = snapshot.changes.map((change) => {
+    const target = targets.get(change.path);
+    if (target === undefined || target === change.staged) return change;
+    changed = true;
+    return { ...change, staged: target };
+  });
+  return changed ? { ...snapshot, changes } : snapshot;
+};
+
 interface RefreshFlight {
   client: GitClient;
   generation: number;
@@ -140,9 +155,21 @@ interface AiGenerationFlight {
   generation: number;
 }
 
+interface StagingSession {
+  targets: Map<string, boolean>;
+  desired: Map<string, boolean>;
+  confirmed: Map<string, boolean[]>;
+  promise: Promise<boolean> | null;
+  accepting: boolean;
+}
+
 interface MutationOptions {
   submittedMessage?: string;
   refreshOnFailure?: boolean;
+  suppressSuccessNotice?: boolean;
+  onFailure?: () => void;
+  onAfterRefresh?: () => void;
+  repeatWhile?: () => boolean;
 }
 
 interface PendingRefresh {
@@ -220,6 +247,7 @@ export function GitProvider({
   >(null);
   const [commitMessage, setCommitMessage] = useState("");
   const [busyAction, setBusyAction] = useState<GitAction | null>(null);
+  const [stagingInputsLocked, setStagingInputsLocked] = useState(false);
   const [cancellingOperation, setCancellingOperation] = useState(false);
   const [generatingCommitMessage, setGeneratingCommitMessage] = useState(false);
   const [noticeFeedback, setNoticeFeedback] = useState<Feedback | null>(null);
@@ -228,6 +256,7 @@ export function GitProvider({
   const [refreshErrorFeedback, setRefreshErrorFeedback] =
     useState<Feedback | null>(null);
   const mutationRef = useRef<MutationFlight | null>(null);
+  const stagingSessionRef = useRef<StagingSession | null>(null);
   const cancellationRequestRef = useRef<symbol | null>(null);
   const aiGenerationRef = useRef<AiGenerationFlight | null>(null);
   const mountedRef = useRef(false);
@@ -267,8 +296,17 @@ export function GitProvider({
             await targetClient.getSnapshot(),
           );
           if (!isCurrent()) return false;
+          const displayedSnapshot =
+            stagingSessionRef.current?.accepting === true
+              ? applyStagingTargets(
+                  nextSnapshot,
+                  stagingSessionRef.current.desired,
+                )
+              : nextSnapshot;
           setSnapshot((current) =>
-            snapshotsEqual(current, nextSnapshot) ? current : nextSnapshot,
+            snapshotsEqual(current, displayedSnapshot)
+              ? current
+              : displayedSnapshot,
           );
           setSelectedRepository((current) =>
             repositoriesEqual(current, nextSnapshot.repository)
@@ -404,6 +442,7 @@ export function GitProvider({
       refreshTokenRef.current = null;
       tokenCheckInFlightRef.current = false;
       mutationRef.current = null;
+      stagingSessionRef.current = null;
       cancellationRequestRef.current = null;
       aiGenerationRef.current = null;
     };
@@ -419,6 +458,8 @@ export function GitProvider({
       mutationRef.current = null;
       setBusyAction(null);
     }
+    stagingSessionRef.current = null;
+    setStagingInputsLocked(false);
     cancellationRequestRef.current = null;
     setCancellingOperation(false);
     if (aiGenerationRef.current) {
@@ -506,70 +547,99 @@ export function GitProvider({
       setNoticeFeedback(null);
 
       try {
-        const result = await operation(targetClient);
-        if (!isCurrent()) return false;
+        while (true) {
+          const result = await operation(targetClient);
+          if (!isCurrent()) return false;
 
-        if (!result.success) {
-          if (/cancelled/i.test(result.message ?? "")) {
-            setNoticeFeedback(
-              result.message ? { kind: "message", message: result.message } : null,
-            );
+          if (!result.success) {
+            options.onFailure?.();
+            if (/cancelled/i.test(result.message ?? "")) {
+              setNoticeFeedback(
+                result.message
+                  ? { kind: "message", message: result.message }
+                  : null,
+              );
+              return false;
+            }
+            const commitCompleted =
+              action === "commitAndPush" &&
+              isCommitAndPushResult(result) &&
+              result.committed;
+            if (
+              commitCompleted &&
+              options.submittedMessage !== undefined
+            ) {
+              setCommitMessage((currentDraft) =>
+                currentDraft === options.submittedMessage ? "" : currentDraft,
+              );
+            }
+            const feedback: Feedback =
+              commitCompleted && result.message
+                ? {
+                    kind: "commitPushPartialFailure",
+                    message: result.message,
+                  }
+                : result.message
+                  ? { kind: "message", message: result.message }
+                  : { kind: "actionFailed", action };
+            setActionErrorFeedback(feedback);
+            if (options.refreshOnFailure) {
+              if (
+                !(await refreshAfterMutation(
+                  targetClient,
+                  generation,
+                  isCurrent,
+                ))
+              ) {
+                return false;
+              }
+              setActionErrorFeedback(feedback);
+            }
             return false;
           }
-          const commitCompleted =
-            action === "commitAndPush" &&
-            isCommitAndPushResult(result) &&
-            result.committed;
-          if (
-            commitCompleted &&
-            options.submittedMessage !== undefined
-          ) {
+
+          if (options.submittedMessage !== undefined) {
             setCommitMessage((currentDraft) =>
               currentDraft === options.submittedMessage ? "" : currentDraft,
             );
           }
-          const feedback: Feedback =
-            commitCompleted && result.message
-              ? {
-                  kind: "commitPushPartialFailure",
-                  message: result.message,
-                }
-              : result.message
-                ? { kind: "message", message: result.message }
-                : { kind: "actionFailed", action };
-          setActionErrorFeedback(feedback);
-          if (options.refreshOnFailure) {
-            if (
-              !(await refreshAfterMutation(
-                targetClient,
-                generation,
-                isCurrent,
-              ))
-            ) {
-              return false;
-            }
-            setActionErrorFeedback(feedback);
+          if (!options.suppressSuccessNotice) {
+            setNoticeFeedback(
+              result.message ? { kind: "message", message: result.message } : null,
+            );
           }
-          return false;
+          if (
+            !(await refreshAfterMutation(
+              targetClient,
+              generation,
+              isCurrent,
+            ))
+          ) {
+            return false;
+          }
+          options.onAfterRefresh?.();
+          if (!options.repeatWhile?.()) return true;
         }
-
-        if (options.submittedMessage !== undefined) {
-          setCommitMessage((currentDraft) =>
-            currentDraft === options.submittedMessage ? "" : currentDraft,
-          );
-        }
-        setNoticeFeedback(
-          result.message
-            ? { kind: "message", message: result.message }
-            : null,
-        );
-        return await refreshAfterMutation(targetClient, generation, isCurrent);
       } catch (reason) {
         if (!isCurrent()) return false;
-        setActionErrorFeedback({
+        options.onFailure?.();
+        const feedback: Feedback = {
           kind: "message",
           message: getErrorMessage(reason),
-        });
+        };
+        setActionErrorFeedback(feedback);
+        if (options.refreshOnFailure) {
+          if (
+            !(await refreshAfterMutation(
+              targetClient,
+              generation,
+              isCurrent,
+            ))
+          ) {
+            return false;
+          }
+          setActionErrorFeedback(feedback);
+        }
         return false;
       } finally {
         if (isCurrent()) {
@@ -581,6 +651,176 @@ export function GitProvider({
       }
     },
     [refreshAfterMutation],
+  );
+
+  const setStaged = useCallback(
+    async (paths: string[], staged: boolean): Promise<boolean> => {
+      const activeMutation = mutationRef.current;
+      const activeStagingSession = stagingSessionRef.current;
+      if (
+        paths.length === 0 ||
+        (activeMutation &&
+          (activeMutation.action !== "stage" &&
+            activeMutation.action !== "unstage")) ||
+        (activeMutation && !activeStagingSession) ||
+        (activeStagingSession && !activeStagingSession.accepting) ||
+        !mountedRef.current ||
+        !visibleRef.current ||
+        !snapshot
+      ) {
+        return false;
+      }
+
+      const selectedPaths = new Set(paths);
+      const matchingChanges = snapshot.changes.filter((change) =>
+        selectedPaths.has(change.path),
+      );
+      if (matchingChanges.length === 0) return false;
+
+      const session =
+        activeStagingSession ??
+        ({
+          targets: new Map<string, boolean>(),
+          desired: new Map<string, boolean>(),
+          confirmed: new Map<string, boolean[]>(),
+          promise: null,
+          accepting: true,
+        } satisfies StagingSession);
+      if (!activeStagingSession) {
+        stagingSessionRef.current = session;
+        setStagingInputsLocked(false);
+      }
+      for (const path of selectedPaths) {
+        const pathChanges = matchingChanges.filter(
+          (change) => change.path === path,
+        );
+        if (
+          pathChanges.length > 0 &&
+          !session.confirmed.has(path)
+        ) {
+          session.confirmed.set(
+            path,
+            pathChanges.map((change) => change.staged),
+          );
+        }
+        if (pathChanges.length > 0) {
+          session.targets.set(path, staged);
+          session.desired.set(path, staged);
+        }
+      }
+      setSnapshot((current) => {
+        if (!current) return current;
+        const changes = current.changes.map((change) =>
+          selectedPaths.has(change.path) && change.staged !== staged
+            ? { ...change, staged }
+            : change,
+        );
+        return { ...current, changes };
+      });
+
+      const existingPromise = session.promise;
+      if (existingPromise) return existingPromise;
+
+      const rollbackToConfirmed = () => {
+        const confirmedStates = new Map(session.confirmed);
+        setSnapshot((current) => {
+          if (!current) return current;
+          const occurrences = new Map<string, number>();
+          const changes = current.changes.map((change) => {
+            const pathStates = confirmedStates.get(change.path);
+            if (!pathStates || pathStates.length === 0) return change;
+            const occurrence = occurrences.get(change.path) ?? 0;
+            occurrences.set(change.path, occurrence + 1);
+            const confirmedState =
+              pathStates.length === 1
+                ? pathStates[0]
+                : (pathStates[occurrence] ?? pathStates[pathStates.length - 1]);
+            return confirmedState === change.staged
+              ? change
+              : { ...change, staged: confirmedState };
+          });
+          return { ...current, changes };
+        });
+      };
+      const stopAcceptingStagingChanges = () => {
+        session.accepting = false;
+        session.targets.clear();
+        session.desired.clear();
+        setStagingInputsLocked(true);
+      };
+      const reapplyPendingTargets = () => {
+        const pendingTargets = new Map(session.targets);
+        if (pendingTargets.size === 0) return;
+        setSnapshot((current) => {
+          if (!current) return current;
+          const changes = current.changes.map((change) => {
+            const targetState = pendingTargets.get(change.path);
+            return targetState === undefined || targetState === change.staged
+              ? change
+              : { ...change, staged: targetState };
+          });
+          return { ...current, changes };
+        });
+      };
+      const processQueue = async (
+        targetClient: GitClient,
+      ): Promise<OperationResult> => {
+        try {
+          while (session.targets.size > 0) {
+            const batch = [...session.targets.entries()];
+            session.targets.clear();
+
+            for (const targetState of [true, false]) {
+              const batchPaths = batch
+                .filter(([path, desiredState]) => {
+                  if (desiredState !== targetState) return false;
+                  const confirmedStates = session.confirmed.get(path);
+                  return !confirmedStates?.every(
+                    (confirmedState) => confirmedState === targetState,
+                  );
+                })
+                .map(([path]) => path);
+              if (batchPaths.length === 0) continue;
+
+              const result = targetState
+                ? await targetClient.stage(batchPaths)
+                : await targetClient.unstage(batchPaths);
+              if (!result.success) {
+                stopAcceptingStagingChanges();
+                return result;
+              }
+              for (const path of batchPaths) {
+                session.confirmed.set(path, [targetState]);
+              }
+            }
+          }
+          return { success: true };
+        } catch (error) {
+          stopAcceptingStagingChanges();
+          throw error;
+        }
+      };
+      const promise = runMutation(
+        staged ? "stage" : "unstage",
+        processQueue,
+        {
+          refreshOnFailure: true,
+          suppressSuccessNotice: true,
+          onFailure: rollbackToConfirmed,
+          onAfterRefresh: reapplyPendingTargets,
+          repeatWhile: () => session.targets.size > 0,
+        },
+      );
+      session.promise = promise;
+      void promise.finally(() => {
+        if (stagingSessionRef.current === session) {
+          stagingSessionRef.current = null;
+          setStagingInputsLocked(false);
+        }
+      });
+      return promise;
+    },
+    [runMutation, snapshot],
   );
 
   const cancelOperation = useCallback(async (): Promise<boolean> => {
@@ -708,6 +948,7 @@ export function GitProvider({
       selectedRepository,
       commitMessage,
       busyAction,
+      stagingInputsLocked,
       cancellingOperation,
       generatingCommitMessage,
       notice,
@@ -720,10 +961,7 @@ export function GitProvider({
         runMutation("selectRepository", (targetClient) =>
           targetClient.selectRepository(path),
         ),
-      setStaged: (paths, staged) =>
-        runMutation(staged ? "stage" : "unstage", (targetClient) =>
-          staged ? targetClient.stage(paths) : targetClient.unstage(paths),
-        ),
+      setStaged,
       commit: () =>
         runMutation(
           "commit",
@@ -780,7 +1018,9 @@ export function GitProvider({
       refresh,
       runMutation,
       selectedRepository,
+      setStaged,
       snapshot,
+      stagingInputsLocked,
       updateCommitMessage,
     ],
   );

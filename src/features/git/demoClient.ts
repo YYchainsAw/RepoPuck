@@ -116,10 +116,25 @@ export function createDemoGitClient(): GitClient {
         throw new Error("Stage at least one file before generating a message.");
       }
 
-      const scope = request.scope.trim();
-      const prefix = scope
-        ? `${request.commitType}(${scope}):`
-        : `${request.commitType}:`;
+      const documentationOnly = stagedChanges.every((change) =>
+        /\.(?:md|mdx|txt)$/i.test(change.path),
+      );
+      const testsOnly = stagedChanges.every((change) =>
+        /(?:^|\/)(?:tests?|__tests__)(?:\/|$)|\.(?:test|spec)\.[^/]+$/i.test(
+          change.path,
+        ),
+      );
+      const commitType = documentationOnly
+        ? "docs"
+        : testsOnly
+          ? "test"
+          : stagedChanges.some((change) => change.kind === "added")
+            ? "feat"
+            : "fix";
+      const scope = stagedChanges.every((change) => change.path.startsWith("src/"))
+        ? "ui"
+        : "";
+      const prefix = scope ? `${commitType}(${scope}):` : `${commitType}:`;
       const subject =
         request.language === "zh-CN"
           ? "更新暂存的项目文件"

@@ -30,8 +30,6 @@ describe("AI commit preferences", () => {
       baseUrl: "https://api.openai.com/v1",
       model: "gpt-4.1-mini",
       language: "zh-CN",
-      commitType: "feat",
-      scope: "",
     });
   });
 
@@ -67,51 +65,33 @@ describe("AI commit preferences", () => {
     });
   });
 
-  it("normalizes invalid preferences and bounds the optional scope", () => {
+  it("normalizes provider preferences and drops legacy fixed format fields", () => {
     expect(
       normalizeAICommitPreferences({
         baseUrl: "  https://example.test/v1  ",
         model: "  custom-model  ",
         language: "unsupported",
-        commitType: "breaking",
-        scope: `  ${"a".repeat(40)}  `,
+        commitType: "fix",
+        scope: "ui",
       }),
     ).toEqual({
       baseUrl: "https://example.test/v1",
       model: "custom-model",
       language: "zh-CN",
-      commitType: "feat",
-      scope: "a".repeat(32),
     });
   });
 
-  it.each([
-    "feat",
-    "fix",
-    "docs",
-    "style",
-    "refactor",
-    "perf",
-    "test",
-    "build",
-    "ci",
-    "chore",
-    "revert",
-  ] as const)("accepts the persisted %s Conventional Commit choice", (commitType) => {
+  it("keeps valid provider, model, and language preferences", () => {
     expect(
       normalizeAICommitPreferences({
         baseUrl: "http://localhost:11434/v1",
         model: "local-model",
         language: "en",
-        commitType,
-        scope: "ui",
       }),
     ).toEqual({
       baseUrl: "http://localhost:11434/v1",
       model: "local-model",
       language: "en",
-      commitType,
-      scope: "ui",
     });
   });
 });

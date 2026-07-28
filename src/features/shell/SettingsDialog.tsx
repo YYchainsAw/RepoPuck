@@ -15,7 +15,6 @@ import {
   getLanguagePreference,
   type AICommitLanguage,
   type AICommitPreferences,
-  type ConventionalCommitType,
   type LanguagePreference,
   type ShellSettings,
   type ThemePreference,
@@ -52,20 +51,6 @@ type ApiKeyState =
   | "saving"
   | "deleting";
 type AiContextState = "loading" | "ready" | "unavailable";
-
-const COMMIT_TYPES: ConventionalCommitType[] = [
-  "feat",
-  "fix",
-  "docs",
-  "refactor",
-  "perf",
-  "test",
-  "build",
-  "ci",
-  "chore",
-  "style",
-  "revert",
-];
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -439,10 +424,11 @@ export function SettingsDialog({
               />
             </label>
 
-            <label className="settings-field" htmlFor="ai-language">
+            <label className="settings-field ai-settings-wide" htmlFor="ai-language">
               <span>{copy.settings.commitLanguage}</span>
               <select
                 id="ai-language"
+                aria-label={copy.settings.commitLanguage}
                 value={aiCommit.language}
                 onChange={(event) =>
                   changeAiCommit({ language: event.target.value as AICommitLanguage })
@@ -451,47 +437,7 @@ export function SettingsDialog({
                 <option value="zh-CN">中文</option>
                 <option value="en">English</option>
               </select>
-            </label>
-
-            <label className="settings-field" htmlFor="ai-commit-type">
-              <span>{copy.settings.commitType}</span>
-              <select
-                id="ai-commit-type"
-                value={aiCommit.commitType}
-                onChange={(event) =>
-                  changeAiCommit({
-                    commitType: event.target.value as ConventionalCommitType,
-                  })
-                }
-              >
-                {COMMIT_TYPES.map((commitType) => (
-                  <option value={commitType} key={commitType}>
-                    {commitType}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="settings-field ai-settings-wide" htmlFor="ai-scope">
-              <span>{copy.settings.scopeOptional}</span>
-              <input
-                id="ai-scope"
-                type="text"
-                aria-label={copy.settings.scopeOptional}
-                maxLength={32}
-                spellCheck={false}
-                placeholder="ui"
-                value={aiCommit.scope}
-                onChange={(event) => changeAiCommit({ scope: event.target.value })}
-              />
-              <small>
-                {copy.settings.preview}:{" "}
-                <code>
-                  {aiCommit.commitType}
-                  {aiCommit.scope ? `(${aiCommit.scope})` : ""}:{" "}
-                  {copy.settings.generatedSubject[aiCommit.language]}
-                </code>
-              </small>
+              <small>{copy.settings.commitFormatAutomatic}</small>
             </label>
           </div>
 
