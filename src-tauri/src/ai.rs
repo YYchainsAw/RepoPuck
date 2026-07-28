@@ -570,9 +570,7 @@ fn parse_conventional_prefix(prefix: &str) -> Result<(&str, Option<&str>), Strin
     if let Some((commit_type, scope_with_suffix)) = prefix.split_once('(') {
         let scope = scope_with_suffix
             .strip_suffix(')')
-            .filter(|scope| {
-                !scope.is_empty() && !scope.contains('(') && !scope.contains(')')
-            })
+            .filter(|scope| !scope.is_empty() && !scope.contains('(') && !scope.contains(')'))
             .ok_or_else(|| {
                 "AI provider returned an invalid Conventional Commit scope".to_owned()
             })?;
