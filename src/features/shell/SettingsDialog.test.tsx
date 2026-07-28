@@ -256,9 +256,13 @@ it("keeps settings controls and recent repository rows at least 44 pixels tall",
   expect(getComputedStyle(screen.getByRole("button", { name: "Open C:\\work\\one" })).minHeight).toBe(
     "44px",
   );
+  const content = document.querySelector<HTMLElement>(".settings-dialog-content");
+  expect(content).not.toBeNull();
+  expect(getComputedStyle(content!).overflowY).not.toBe("auto");
+  expect(getComputedStyle(content!).maxHeight).toBe("");
 });
 
-it("persists AI language and Conventional Commit formatting preferences", async () => {
+it("lets AI choose the Conventional Commit type and scope", async () => {
   const persistence: ShellSettingsPersistence = {
     save: vi.fn().mockResolvedValue(undefined),
   };
@@ -282,12 +286,6 @@ it("persists AI language and Conventional Commit formatting preferences", async 
   fireEvent.change(screen.getByRole("combobox", { name: "Commit language" }), {
     target: { value: "en" },
   });
-  fireEvent.change(screen.getByRole("combobox", { name: "Commit type" }), {
-    target: { value: "fix" },
-  });
-  fireEvent.change(screen.getByRole("textbox", { name: "Scope (optional)" }), {
-    target: { value: "ui" },
-  });
 
   await waitFor(() =>
     expect(persistence.save).toHaveBeenLastCalledWith({
@@ -298,12 +296,20 @@ it("persists AI language and Conventional Commit formatting preferences", async 
         baseUrl: "https://api.openai.com/v1",
         model: "gpt-4.1-mini",
         language: "en",
-        commitType: "fix",
-        scope: "ui",
       },
     }),
   );
-  expect(screen.getByText(/fix\(ui\):/)).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      "AI chooses the commit type and optional scope from the staged diff.",
+    ),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("combobox", { name: "Commit type" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("textbox", { name: "Scope (optional)" }),
+  ).not.toBeInTheDocument();
 });
 
 it("keeps secure key controls unavailable in the browser demo", () => {

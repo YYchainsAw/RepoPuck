@@ -66,6 +66,7 @@ function createWorkspace(overrides: Partial<GitWorkspaceValue> = {}): GitWorkspa
     selectedRepository: snapshot.repository,
     commitMessage: "Ship it",
     busyAction: null,
+    stagingInputsLocked: false,
     cancellingOperation: false,
     generatingCommitMessage: false,
     notice: null,
@@ -147,8 +148,6 @@ describe("PanelShell", () => {
           baseUrl: "https://example.ai/v1",
           model: "game-commit-model",
           language: "zh-CN",
-          commitType: "feat",
-          scope: "unity",
         },
       },
     };
@@ -162,8 +161,6 @@ describe("PanelShell", () => {
       baseUrl: "https://example.ai/v1",
       model: "game-commit-model",
       language: "zh-CN",
-      commitType: "feat",
-      scope: "unity",
     });
   });
 
@@ -472,6 +469,31 @@ describe("PanelShell", () => {
       target: { value: "Updated message" },
     });
     expect(workspace.current.setCommitMessage).toHaveBeenCalledWith("Updated message");
+  });
+
+  it("does not show a loading banner for a staging checkbox update", () => {
+    workspace.current = createWorkspace({ busyAction: "stage" });
+
+    render(<PanelShell />);
+
+    expect(screen.queryByText("Staging…")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: "Unstage src/App.tsx" }),
+    ).toBeEnabled();
+  });
+
+  it("temporarily locks staging inputs while recovering from a Git error", () => {
+    workspace.current = createWorkspace({
+      busyAction: "stage",
+      stagingInputsLocked: true,
+    });
+
+    render(<PanelShell />);
+
+    expect(screen.queryByText("Staging…")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: "Unstage src/App.tsx" }),
+    ).toBeDisabled();
   });
 
   it("wires both commit actions to the workspace", () => {

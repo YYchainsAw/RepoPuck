@@ -39,8 +39,6 @@ const aiPreferences = {
   baseUrl: "https://api.openai.com/v1",
   model: "gpt-4.1-mini",
   language: "en" as const,
-  commitType: "feat" as const,
-  scope: "ui",
 };
 
 function cloneSnapshot(snapshot: RepositorySnapshot): RepositorySnapshot {
@@ -66,13 +64,13 @@ function createTestClient() {
       snapshot.changes = snapshot.changes.map((change) =>
         paths.includes(change.path) ? { ...change, staged: true } : change,
       );
-      return { success: true };
+      return { success: true, message: "Staging updated" };
     }),
     unstage: vi.fn(async (paths: string[]) => {
       snapshot.changes = snapshot.changes.map((change) =>
         paths.includes(change.path) ? { ...change, staged: false } : change,
       );
-      return { success: true };
+      return { success: true, message: "Staging updated" };
     }),
     commit: vi.fn(success),
     generateCommitMessage: vi.fn(
@@ -216,6 +214,247 @@ describe("useGitWorkspace", () => {
 
     expect(client.stage).toHaveBeenCalledWith(["src/App.tsx"]);
     expect(result.current.snapshot?.changes[0].staged).toBe(true);
+    expect(result.current.notice).toBeNull();
+  });
+
+  it("rolls back an optimistic staging change when Git rejects it", async () => {
+    const client = createTestClient();
+    let finishStage!: (result: { success: boolean; message: string }) => void;
+    client.stage.mockImplementationOnce(
+      () =>
+        new Promise<{ success: boolean; message: string }>((resolve) => {
+          finishStage = resolve;
+        }),
+    );
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    let stagePromise!: Promise<boolean>;
+    act(() => {
+      stagePromise = result.current.setStaged(["src/App.tsx"], true);
+    });
+    await waitFor(() =>
+      expect(result.current.snapshot?.changes[0].staged).toBe(true),
+    );
+
+    client.getSnapshot.mockRejectedValueOnce(
+      new Error("Could not refresh repository"),
+    );
+    await act(async () => {
+      finishStage({ success: false, message: "Could not update the index" });
+      expect(await stagePromise).toBe(false);
+    });
+
+    expect(result.current.snapshot?.changes[0].staged).toBe(false);
+    expect(result.current.notice).toBeNull();
+    expect(result.current.error).toBe("Could not update the index");
+  });
+
+  it("rolls back an optimistic staging change when Git throws", async () => {
+    const client = createTestClient();
+    client.stage.mockRejectedValueOnce(new Error("Git index is locked"));
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+    client.getSnapshot.mockRejectedValueOnce(
+      new Error("Could not refresh repository"),
+    );
+
+    await act(async () => {
+      expect(
+        await result.current.setStaged(["src/App.tsx"], true),
+      ).toBe(false);
+    });
+
+    expect(result.current.snapshot?.changes[0].staged).toBe(false);
+    expect(result.current.notice).toBeNull();
+    expect(result.current.error).toBe("Git index is locked");
+  });
+
+  it("stages a path that has both staged and unstaged entries", async () => {
+    const client = createTestClient();
+    const mixedSnapshot = cloneSnapshot(initialSnapshot);
+    mixedSnapshot.changes = [
+      { ...mixedSnapshot.changes[0], staged: true, additions: 1 },
+      { ...mixedSnapshot.changes[0], staged: false, additions: 1 },
+    ];
+    client.getSnapshot.mockResolvedValueOnce(mixedSnapshot);
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() =>
+      expect(result.current.snapshot?.changes).toHaveLength(2),
+    );
+
+    await act(async () => {
+      expect(
+        await result.current.setStaged(["src/App.tsx"], true),
+      ).toBe(true);
+    });
+
+    expect(client.stage).toHaveBeenCalledWith(["src/App.tsx"]);
+    expect(
+      result.current.snapshot?.changes.every((change) => change.staged),
+    ).toBe(true);
+  });
+
+  it("restores a mixed staged state when staging and refresh both fail", async () => {
+    const client = createTestClient();
+    const mixedSnapshot = cloneSnapshot(initialSnapshot);
+    mixedSnapshot.changes = [
+      { ...mixedSnapshot.changes[0], staged: true, additions: 1 },
+      { ...mixedSnapshot.changes[0], staged: false, additions: 1 },
+    ];
+    client.getSnapshot.mockResolvedValueOnce(mixedSnapshot);
+    client.stage.mockResolvedValueOnce({
+      success: false,
+      message: "Could not update the index",
+    });
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() =>
+      expect(result.current.snapshot?.changes).toHaveLength(2),
+    );
+    client.getSnapshot.mockRejectedValueOnce(
+      new Error("Could not refresh repository"),
+    );
+
+    await act(async () => {
+      expect(
+        await result.current.setStaged(["src/App.tsx"], true),
+      ).toBe(false);
+    });
+
+    expect(client.stage).toHaveBeenCalledWith(["src/App.tsx"]);
+    expect(
+      result.current.snapshot?.changes.map((change) => change.staged),
+    ).toEqual([true, false]);
+  });
+
+  it("queues rapid staging changes while keeping the checkbox optimistic", async () => {
+    const client = createTestClient();
+    let finishStage!: (result: { success: boolean; message: string }) => void;
+    client.stage.mockImplementationOnce(
+      () =>
+        new Promise<{ success: boolean; message: string }>((resolve) => {
+          finishStage = resolve;
+        }),
+    );
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    let stagePromise!: Promise<boolean>;
+    act(() => {
+      stagePromise = result.current.setStaged(["src/App.tsx"], true);
+    });
+    await waitFor(() => expect(result.current.busyAction).toBe("stage"));
+    expect(result.current.snapshot?.changes[0].staged).toBe(true);
+
+    let unstagePromise!: Promise<boolean>;
+    act(() => {
+      unstagePromise = result.current.setStaged(["src/App.tsx"], false);
+    });
+    expect(result.current.snapshot?.changes[0].staged).toBe(false);
+
+    await act(async () => {
+      finishStage({ success: true, message: "Staging updated" });
+      expect(await stagePromise).toBe(true);
+      expect(await unstagePromise).toBe(true);
+    });
+
+    expect(client.stage).toHaveBeenCalledWith(["src/App.tsx"]);
+    expect(client.unstage).toHaveBeenCalledWith(["src/App.tsx"]);
+    expect(result.current.snapshot?.changes[0].staged).toBe(false);
+    expect(result.current.notice).toBeNull();
+  });
+
+  it("locks staging inputs while recovering from a failed queued operation", async () => {
+    const client = createTestClient();
+    client.stage.mockResolvedValueOnce({
+      success: false,
+      message: "Could not update the index",
+    });
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    let finishRefresh!: (snapshot: RepositorySnapshot) => void;
+    client.getSnapshot.mockImplementationOnce(
+      () =>
+        new Promise<RepositorySnapshot>((resolve) => {
+          finishRefresh = resolve;
+        }),
+    );
+
+    let stagePromise!: Promise<boolean>;
+    act(() => {
+      stagePromise = result.current.setStaged(["src/App.tsx"], true);
+    });
+    await waitFor(() => expect(client.getSnapshot).toHaveBeenCalledTimes(2));
+    expect(result.current.stagingInputsLocked).toBe(true);
+
+    await act(async () => {
+      expect(
+        await result.current.setStaged(["src/App.tsx"], true),
+      ).toBe(false);
+    });
+    expect(client.stage).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      finishRefresh(cloneSnapshot(initialSnapshot));
+      expect(await stagePromise).toBe(false);
+    });
+    expect(result.current.stagingInputsLocked).toBe(false);
+    expect(result.current.snapshot?.changes[0].staged).toBe(false);
+  });
+
+  it("keeps staging changes queued while an authoritative refresh is running", async () => {
+    const client = createTestClient();
+    const { result } = renderHook(() => useGitWorkspace(), {
+      wrapper: createWrapper(client),
+    });
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+
+    let finishRefresh!: (snapshot: RepositorySnapshot) => void;
+    client.getSnapshot.mockImplementationOnce(
+      () =>
+        new Promise<RepositorySnapshot>((resolve) => {
+          finishRefresh = resolve;
+        }),
+    );
+
+    let stagePromise!: Promise<boolean>;
+    act(() => {
+      stagePromise = result.current.setStaged(["src/App.tsx"], true);
+    });
+    await waitFor(() => expect(client.getSnapshot).toHaveBeenCalledTimes(2));
+    expect(result.current.snapshot?.changes[0].staged).toBe(true);
+
+    let unstagePromise!: Promise<boolean>;
+    act(() => {
+      unstagePromise = result.current.setStaged(["src/App.tsx"], false);
+    });
+    expect(result.current.snapshot?.changes[0].staged).toBe(false);
+
+    const stagedSnapshot = cloneSnapshot(initialSnapshot);
+    stagedSnapshot.changes[0].staged = true;
+    await act(async () => {
+      finishRefresh(stagedSnapshot);
+      expect(await stagePromise).toBe(true);
+      expect(await unstagePromise).toBe(true);
+    });
+
+    expect(client.stage).toHaveBeenCalledWith(["src/App.tsx"]);
+    expect(client.unstage).toHaveBeenCalledWith(["src/App.tsx"]);
+    expect(result.current.snapshot?.changes[0].staged).toBe(false);
+    expect(result.current.notice).toBeNull();
   });
 
   it("fills the composer with a generated commit message", async () => {
@@ -592,10 +831,10 @@ describe("useGitWorkspace", () => {
 
   it("ignores concurrent actions while a mutation is busy", async () => {
     const client = createTestClient();
-    let finishStage!: (result: OperationResult) => void;
+    let finishStage!: (result: { success: boolean; message: string }) => void;
     client.stage.mockImplementationOnce(
       () =>
-        new Promise((resolve) => {
+        new Promise<{ success: boolean; message: string }>((resolve) => {
           finishStage = resolve;
         }),
     );
@@ -609,6 +848,8 @@ describe("useGitWorkspace", () => {
       stagePromise = result.current.setStaged(["src/App.tsx"], true);
     });
     await waitFor(() => expect(result.current.busyAction).toBe("stage"));
+    expect(result.current.snapshot?.changes[0].staged).toBe(true);
+    expect(result.current.notice).toBeNull();
 
     await act(async () => {
       expect(await result.current.push()).toBe(false);
@@ -616,7 +857,7 @@ describe("useGitWorkspace", () => {
     expect(client.push).not.toHaveBeenCalled();
 
     await act(async () => {
-      finishStage({ success: true });
+      finishStage({ success: true, message: "Staging updated" });
       await stagePromise;
     });
     expect(result.current.busyAction).toBeNull();
@@ -628,7 +869,7 @@ describe("useGitWorkspace", () => {
     let finishCancellation!: (result: OperationResult) => void;
     client.fetch.mockImplementationOnce(
       () =>
-        new Promise((resolve) => {
+        new Promise<OperationResult>((resolve) => {
           finishFetch = resolve;
         }),
     );

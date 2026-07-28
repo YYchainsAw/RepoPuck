@@ -38,25 +38,10 @@ export interface CommitAndPushResult extends OperationResult {
 
 export type AiCommitLanguage = "zh-CN" | "en";
 
-export type ConventionalCommitType =
-  | "feat"
-  | "fix"
-  | "docs"
-  | "style"
-  | "refactor"
-  | "perf"
-  | "test"
-  | "build"
-  | "ci"
-  | "chore"
-  | "revert";
-
 export interface AiCommitPreferences {
   baseUrl: string;
   model: string;
   language: AiCommitLanguage;
-  commitType: ConventionalCommitType;
-  scope: string;
 }
 
 export interface GenerateCommitMessageResult {

@@ -27,10 +27,7 @@ export interface ShellCopy {
     aiBaseUrlHelp: string;
     aiModel: string;
     commitLanguage: string;
-    commitType: string;
-    scopeOptional: string;
-    preview: string;
-    generatedSubject: Readonly<Record<AppLanguage, string>>;
+    commitFormatAutomatic: string;
     apiKey: string;
     apiKeyDescription: string;
     providerKeyScope(provider: string): string;
@@ -187,18 +184,14 @@ const en: ShellCopy = {
     keepPanelOnTop: "Keep panel on top",
     topModesStayAbove: "Top modes stay above other windows by design.",
     aiTitle: "AI commit message",
-    aiDescription: "Generate a Conventional Commit message from staged changes.",
+    aiDescription:
+      "Generate a complete Conventional Commit message from staged changes.",
     aiBaseUrl: "AI service base URL",
     aiBaseUrlHelp: "OpenAI-compatible; RepoPuck targets /chat/completions.",
     aiModel: "AI model",
     commitLanguage: "Commit language",
-    commitType: "Commit type",
-    scopeOptional: "Scope (optional)",
-    preview: "Preview",
-    generatedSubject: {
-      "zh-CN": "生成的提交主题",
-      en: "generated subject",
-    },
+    commitFormatAutomatic:
+      "AI chooses the commit type and optional scope from the staged diff.",
     apiKey: "API key",
     apiKeyDescription:
       "The key is stored in Windows Credential Manager and is never written to settings.json.",
@@ -364,18 +357,12 @@ const zhCN: ShellCopy = {
     keepPanelOnTop: "面板保持置顶",
     topModesStayAbove: "顶部模式默认显示在其他窗口上方。",
     aiTitle: "AI 提交信息",
-    aiDescription: "根据已暂存的更改生成 Conventional Commit 提交信息。",
+    aiDescription: "根据已暂存的更改生成完整的 Conventional Commit 提交信息。",
     aiBaseUrl: "AI 服务基础 URL",
     aiBaseUrlHelp: "兼容 OpenAI 接口；RepoPuck 请求 /chat/completions。",
     aiModel: "AI 模型",
     commitLanguage: "提交信息语言",
-    commitType: "提交类型",
-    scopeOptional: "作用域（可选）",
-    preview: "预览",
-    generatedSubject: {
-      "zh-CN": "生成的提交主题",
-      en: "generated subject",
-    },
+    commitFormatAutomatic: "AI 会根据已暂存的改动自动判断提交类型和可选作用域。",
     apiKey: "API 密钥",
     apiKeyDescription:
       "密钥保存在 Windows 凭据管理器中，不会写入 settings.json。",

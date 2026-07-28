@@ -22,6 +22,7 @@ export interface GitWorkspaceValue {
   selectedRepository: RepositorySnapshot["repository"] | null;
   commitMessage: string;
   busyAction: GitAction | null;
+  stagingInputsLocked: boolean;
   cancellingOperation: boolean;
   generatingCommitMessage: boolean;
   notice: string | null;

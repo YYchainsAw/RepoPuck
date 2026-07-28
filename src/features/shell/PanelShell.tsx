@@ -35,10 +35,14 @@ export function PanelShell() {
   const [busyElapsedSeconds, setBusyElapsedSeconds] = useState(0);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const busy = workspace.busyAction !== null;
+  const visibleBusyAction =
+    workspace.busyAction === "stage" || workspace.busyAction === "unstage"
+      ? null
+      : workspace.busyAction;
   const closeActionMenu = useCallback(() => setMenuOpen(false), []);
 
   useEffect(() => {
-    if (!workspace.busyAction) {
+    if (!visibleBusyAction) {
       setBusyElapsedSeconds(0);
       return;
     }
@@ -48,7 +52,7 @@ export function PanelShell() {
       setBusyElapsedSeconds(Math.floor((Date.now() - startedAt) / 1_000));
     }, 1_000);
     return () => window.clearInterval(timer);
-  }, [workspace.busyAction]);
+  }, [visibleBusyAction]);
 
   useEffect(() => {
     const closeMenus = (event: KeyboardEvent) => {
@@ -115,14 +119,14 @@ export function PanelShell() {
         </Notice>
       )}
       {workspace.error && <Notice kind="error">{workspace.error}</Notice>}
-      {workspace.busyAction && (
+      {visibleBusyAction && (
         <div className="busy-status" aria-live="polite">
           <Spinner size="small" />
-          <span>{copy.panel.busy[workspace.busyAction]}</span>
+          <span>{copy.panel.busy[visibleBusyAction]}</span>
           {busyElapsedSeconds > 0 && (
             <span className="busy-elapsed">{busyElapsedSeconds}s</span>
           )}
-          {workspace.busyAction === "fetch" && (
+          {visibleBusyAction === "fetch" && (
             <Button
               size="small"
               disabled={workspace.cancellingOperation}
@@ -222,7 +226,10 @@ export function PanelShell() {
                 )}
                 <ChangeGroups
                   changes={workspace.snapshot.changes}
-                  busy={busy}
+                  busy={
+                    visibleBusyAction !== null ||
+                    workspace.stagingInputsLocked
+                  }
                   gameProjectDetected={Boolean(
                     workspace.snapshot.gameProject &&
                       (workspace.snapshot.gameProject.engine === "unity" ||
