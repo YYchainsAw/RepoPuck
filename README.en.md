@@ -104,10 +104,10 @@ AI assistance is optional and never replaces the manual commit flow:
 
 1. Open **More → Settings → AI commit message**.
 2. Enter an OpenAI-compatible Base URL, model name, and API key.
-3. Choose Chinese or English, a commit type such as `feat`, `fix`, or `docs`, and an optional scope.
-4. Stage files and select the compact **AI** button beside the commit field. RepoPuck fills the draft but never commits or pushes automatically.
+3. Choose Chinese or English for the generated message.
+4. Stage files and select the compact **AI** button beside the commit field. The model infers a type such as `feat`, `fix`, or `docs` and an optional scope from the staged diff. RepoPuck fills the draft but never commits or pushes automatically.
 
-RepoPuck assembles the Conventional Commit prefix locally, so results consistently follow forms such as `feat: subject` or `feat(ui): subject`. You can edit every generated draft before committing.
+RepoPuck validates the complete Conventional Commit returned by the model and normalizes it to a single line such as `feat: subject` or `feat(ui): subject`, with a 72-character limit. You can edit every generated draft before committing.
 
 > [!IMPORTANT]
 > API keys are stored separately for each provider origin in **Windows Credential Manager** for the current user. They are never written to `settings.json`, browser storage, logs, or the repository. After switching provider hosts, you must explicitly confirm an existing legacy key or save a key for that provider; RepoPuck never silently sends an old key to a new origin. Only when you explicitly generate a message does RepoPuck send a size-bounded **staged text diff** directly to the configured service. Settings previews the included file count, approximate bytes, omitted binaries, excluded sensitive paths, and truncation state. Automatic filtering cannot identify every secret, so review the staged content and your provider's privacy policy before using any third-party service.
@@ -170,7 +170,7 @@ RepoPuck does not ask you to sign in to GitHub and does not store GitHub tokens,
 
 ### Local data
 
-RepoPuck persists only non-secret convenience settings: theme, pin state, shell mode, panel size, launcher position, selected display, drawer position, a bounded list of recent repository paths, and AI endpoint, model, language, and commit-format preferences. It does not store commit contents, repository file contents, or cursor history; the optional AI API key is stored separately in Windows Credential Manager.
+RepoPuck persists only non-secret convenience settings: theme, pin state, shell mode, panel size, launcher position, selected display, drawer position, a bounded list of recent repository paths, and AI endpoint, model, and language. It does not store commit contents, repository file contents, or cursor history; the optional AI API key is stored separately in Windows Credential Manager.
 
 ### Git processes
 

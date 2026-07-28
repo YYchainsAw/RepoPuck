@@ -2,7 +2,7 @@
 
 RepoPuck is a Windows desktop application built with Tauri 2, Rust, React, and TypeScript. Its main architectural rule is simple: React describes user intent and renders the current state, while Rust owns repository validation, external project activation, Git processes, game-project analysis, shell-mode state, native windows, monitor geometry, and persistence of native placement.
 
-> Version boundary: `v0.2.1` is the current published baseline. This document describes the `v0.2.2` architecture implemented on `develop`, including the low-overhead refresh path, cancellable Fetch, provider-isolated AI credentials, and Windows MSI lifecycle smoke test. The shell-mode baseline has local evidence in [`docs/design-qa.md`](design-qa.md) and passed [CI #11](https://github.com/YYchainsAw/RepoPuck/actions/runs/29917798861); newer additions remain preview work until their own packaged-app validation is complete.
+> Version boundary: `v0.2.2` is the current published baseline. This document describes the `v0.2.3` architecture implemented on `develop`, including optimistic queued staging, AI-inferred Conventional Commit formatting, the low-overhead refresh path, cancellable Fetch, provider-isolated AI credentials, and Windows MSI lifecycle smoke tests. The current implementation passed [frontend, Rust, and packaged MSI CI](https://github.com/YYchainsAw/RepoPuck/actions/runs/30327001521).
 
 The application keeps one Git panel and one launcher WebView. The three shell modes change how those two native surfaces are configured; they do not create three separate Git interfaces:
 
@@ -297,6 +297,8 @@ The submitted message is cleared only after a successful commit or amend, and on
 
 Managed Rust state uses a short-lived repository-selection lock and a separate mutation lock. Read commands clone the selected `GitService` and release the selection lock before running Git; selecting another repository and reading its state therefore remain responsive while a long mutation is in progress. Mutations are still serialized with each other and remain bound to the service instance on which they started. The frontend records the active repository/client generation and discards a snapshot or operation result that returns for an older selection, then refreshes the current repository after the active operation completes.
 
+Staging is optimistic in the frontend: a checkbox updates immediately without a success toast or global loading banner. Rapid stage and unstage intents are coalesced into a per-session serial queue while commit and remote mutations remain blocked. Confirmed state is retained per path and per staged/unstaged entry so partially staged files are not mistaken for fully staged files. A failed Git operation restores the last confirmed local state before attempting an authoritative refresh; inputs are temporarily locked during that recovery so no click can be silently discarded.
+
 ## Git execution and safety boundary
 
 RepoPuck launches `git` directly with `std::process::Command` and a vector of arguments. It never constructs a shell command string. Every blocking repository operation is dispatched through Tauri's blocking task pool, keeping async commands and native window events responsive while Git runs.
@@ -313,7 +315,7 @@ The current command surface covers repository selection and status, staging, com
 
 ## AI commit-message flow and security boundary
 
-AI generation is an optional draft action, not a commit action. The user stages files, chooses a language, Conventional Commit type, optional scope, endpoint, and model, then explicitly selects the compact, unbranded **AI** action beside the draft. The frontend sends only those non-secret preferences to `generate_commit_message`; the Rust command obtains the API key internally and returns only the generated message plus truncation and exclusion metadata. A successful response fills the editable 72-character draft and never invokes Commit or Push.
+AI generation is an optional draft action, not a commit action. The user stages files, chooses a language, endpoint, and model, then explicitly selects the compact, unbranded **AI** action beside the draft. The frontend sends only those non-secret preferences to `generate_commit_message`; the Rust command obtains the API key internally and returns only the generated message plus truncation and exclusion metadata. The model selects the Conventional Commit type and optional scope from the staged diff. A successful response fills the editable 72-character draft and never invokes Commit or Push.
 
 The native path applies these boundaries:
 
@@ -322,9 +324,9 @@ The native path applies these boundaries:
 3. Staged paths are passed to Git as literal pathspec arguments after `--`. An empty or oversized selection fails closed instead of falling back to an unscoped diff.
 4. Repository locking ends after context collection. The network request does not hold the Git mutex, and the selection generation is checked before and after the request so a response from an older repository is rejected.
 5. The configured base URL must use HTTPS, except for loopback HTTP used by local services. Credentials in URLs are rejected, redirects are disabled, the request has a 30-second timeout, and provider response bodies never appear in errors.
-6. The staged diff is labelled as untrusted data in the system instruction. The provider supplies only a subject; Rust validates the requested type and scope, removes an accidental model-supplied prefix, normalizes one line, truncates it, and assembles `type(scope): subject` locally.
+6. The staged diff is labelled as untrusted data in the system instruction. The provider is instructed to return exactly one complete Conventional Commit and choose from the supported lowercase types. Rust validates the model-selected type and optional ASCII scope, accepts either ASCII or full-width colon punctuation, normalizes one line, removes trailing punctuation, and truncates the subject so the complete `type(scope): subject` remains within 72 characters.
 
-Non-secret endpoint and formatting preferences use the ordinary Tauri store. Closing the settings dialog clears any unsaved key from React state. Replacing or removing a credential is explicit, and the browser demo never exposes native key controls.
+Non-secret endpoint, model, and output-language preferences use the ordinary Tauri store. Closing the settings dialog clears any unsaved key from React state. Replacing or removing a credential is explicit, and the browser demo never exposes native key controls.
 
 ## Remote authentication
 
@@ -371,7 +373,7 @@ The Tauri store contains only local convenience settings:
 - `topSurfaceMonitorName`: the preferred monitor for the island and drawer.
 - `drawerAnchors`: finite normalized horizontal drawer positions keyed independently by monitor identity.
 - `recentRepositories`: a bounded list whose first entry may be restored at startup. For a game project nested below its Git root, the remembered value is the project `selectionPath`, preserving both protocol preapproval and game-aware detection across restarts.
-- `aiCommit`: the non-secret AI Base URL, model name, output language, Conventional Commit type, and optional scope.
+- `aiCommit`: the non-secret AI Base URL, model name, and output language.
 
 The old single `panelSize` value is read only as a migration fallback for puck mode. Each new mode keeps its own size so resizing the drawer does not unexpectedly reshape the puck or island panel.
 
