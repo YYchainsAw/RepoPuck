@@ -148,6 +148,7 @@ describe("PanelShell", () => {
           baseUrl: "https://example.ai/v1",
           model: "game-commit-model",
           language: "zh-CN",
+          useScope: true,
         },
       },
     };
@@ -161,6 +162,7 @@ describe("PanelShell", () => {
       baseUrl: "https://example.ai/v1",
       model: "game-commit-model",
       language: "zh-CN",
+      useScope: true,
     });
   });
 

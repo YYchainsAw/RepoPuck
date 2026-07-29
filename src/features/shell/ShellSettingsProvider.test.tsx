@@ -36,6 +36,7 @@ function AISettingsProbe() {
             baseUrl: "https://example.test/v1",
             model: "example-mini",
             language: "en",
+            useScope: true,
           })
         }
       >
@@ -113,6 +114,7 @@ it("persists non-secret AI commit preferences without an API key field", () => {
       baseUrl: "https://example.test/v1",
       model: "example-mini",
       language: "en",
+      useScope: true,
     },
   });
   expect(JSON.stringify(vi.mocked(persistence.save).mock.calls)).not.toContain("apiKey");

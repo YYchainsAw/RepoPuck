@@ -439,6 +439,20 @@ export function SettingsDialog({
               </select>
               <small>{copy.settings.commitFormatAutomatic}</small>
             </label>
+
+            <label className="settings-checkbox ai-settings-wide ai-scope-toggle">
+              <input
+                type="checkbox"
+                checked={aiCommit.useScope}
+                onChange={(event) =>
+                  changeAiCommit({ useScope: event.target.checked })
+                }
+              />
+              <span>
+                {copy.settings.useCommitScope}
+                <small>{copy.settings.useCommitScopeHelp}</small>
+              </span>
+            </label>
           </div>
 
           <div className="api-key-card">

@@ -262,7 +262,7 @@ it("keeps settings controls and recent repository rows at least 44 pixels tall",
   expect(getComputedStyle(content!).maxHeight).toBe("");
 });
 
-it("lets AI choose the Conventional Commit type and scope", async () => {
+it("lets the user choose scope presence while AI chooses its content", async () => {
   const persistence: ShellSettingsPersistence = {
     save: vi.fn().mockResolvedValue(undefined),
   };
@@ -286,6 +286,11 @@ it("lets AI choose the Conventional Commit type and scope", async () => {
   fireEvent.change(screen.getByRole("combobox", { name: "Commit language" }), {
     target: { value: "en" },
   });
+  const useScope = screen.getByRole("checkbox", {
+    name: /Include an AI-generated scope/,
+  });
+  expect(useScope).not.toBeChecked();
+  fireEvent.click(useScope);
 
   await waitFor(() =>
     expect(persistence.save).toHaveBeenLastCalledWith({
@@ -296,12 +301,16 @@ it("lets AI choose the Conventional Commit type and scope", async () => {
         baseUrl: "https://api.openai.com/v1",
         model: "gpt-4.1-mini",
         language: "en",
+        useScope: true,
       },
     }),
   );
   expect(
+    screen.getByText("AI always chooses the commit type from the staged diff."),
+  ).toBeInTheDocument();
+  expect(
     screen.getByText(
-      "AI chooses the commit type and optional scope from the staged diff.",
+      "Off: feat: subject · On: feat(scope): subject. AI chooses both the type and scope name.",
     ),
   ).toBeInTheDocument();
   expect(

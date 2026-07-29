@@ -39,6 +39,7 @@ const aiPreferences = {
   baseUrl: "https://api.openai.com/v1",
   model: "gpt-4.1-mini",
   language: "en" as const,
+  useScope: true,
 };
 
 function cloneSnapshot(snapshot: RepositorySnapshot): RepositorySnapshot {

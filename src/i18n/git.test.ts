@@ -46,5 +46,11 @@ describe("Git translations", () => {
         "zh-CN",
       ),
     ).toBe("请先在设置中保存 AI API 密钥");
+    expect(
+      localizeGitMessage(
+        "AI provider omitted the requested Conventional Commit scope",
+        "zh-CN",
+      ),
+    ).toBe("AI 服务未返回已启用的提交作用域");
   });
 });
