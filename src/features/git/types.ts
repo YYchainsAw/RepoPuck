@@ -42,6 +42,7 @@ export interface AiCommitPreferences {
   baseUrl: string;
   model: string;
   language: AiCommitLanguage;
+  useScope: boolean;
 }
 
 export interface GenerateCommitMessageResult {

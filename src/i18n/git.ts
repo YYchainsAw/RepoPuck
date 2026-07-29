@@ -226,6 +226,8 @@ const exactMessagesZhCN: Record<string, string> = {
   "AI provider rate limit was reached": "已达到 AI 服务的请求频率限制",
   "AI provider is temporarily unavailable": "AI 服务暂时不可用",
   "AI provider returned no commit message": "AI 服务没有返回提交信息",
+  "AI provider omitted the requested Conventional Commit scope":
+    "AI 服务未返回已启用的提交作用域",
 };
 
 export function localizeGitMessage(

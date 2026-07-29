@@ -44,9 +44,23 @@ describe("createGitClient", () => {
         baseUrl: "https://api.openai.com/v1",
         model: "gpt-4.1-mini",
         language: "zh-CN",
+        useScope: false,
       }),
     ).resolves.toEqual({
       message: "fix: 更新暂存的项目文件",
+      truncated: false,
+      excludedFiles: [],
+    });
+
+    await expect(
+      client.generateCommitMessage({
+        baseUrl: "https://api.openai.com/v1",
+        model: "gpt-4.1-mini",
+        language: "en",
+        useScope: true,
+      }),
+    ).resolves.toEqual({
+      message: "fix(project): update staged project files",
       truncated: false,
       excludedFiles: [],
     });
@@ -66,6 +80,7 @@ describe("createGitClient", () => {
       baseUrl: "https://api.openai.com/v1",
       model: "gpt-4.1-mini",
       language: "en",
+      useScope: true,
     });
     await client.amendLastCommit("Revised commit");
     await client.amendLastCommit();
@@ -95,6 +110,7 @@ describe("createGitClient", () => {
             baseUrl: "https://api.openai.com/v1",
             model: "gpt-4.1-mini",
             language: "en",
+            useScope: true,
           },
         },
       ],

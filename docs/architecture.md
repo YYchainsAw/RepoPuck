@@ -2,7 +2,7 @@
 
 RepoPuck is a Windows desktop application built with Tauri 2, Rust, React, and TypeScript. Its main architectural rule is simple: React describes user intent and renders the current state, while Rust owns repository validation, external project activation, Git processes, game-project analysis, shell-mode state, native windows, monitor geometry, and persistence of native placement.
 
-> Version boundary: `v0.2.2` is the current published baseline. This document describes the `v0.2.3` architecture implemented on `develop`, including optimistic queued staging, AI-inferred Conventional Commit formatting, the low-overhead refresh path, cancellable Fetch, provider-isolated AI credentials, and Windows MSI lifecycle smoke tests. The current implementation passed [frontend, Rust, and packaged MSI CI](https://github.com/YYchainsAw/RepoPuck/actions/runs/30327001521).
+> Version boundary: `v0.2.4` is the release baseline described by this document, including optimistic queued staging, user-selected AI scope formatting, the low-overhead refresh path, cancellable Fetch, provider-isolated AI credentials, and Windows MSI lifecycle smoke tests. The implementation passed [frontend, Rust, and packaged MSI CI](https://github.com/YYchainsAw/RepoPuck/actions/runs/30423706299).
 
 The application keeps one Git panel and one launcher WebView. The three shell modes change how those two native surfaces are configured; they do not create three separate Git interfaces:
 
@@ -315,7 +315,7 @@ The current command surface covers repository selection and status, staging, com
 
 ## AI commit-message flow and security boundary
 
-AI generation is an optional draft action, not a commit action. The user stages files, chooses a language, endpoint, and model, then explicitly selects the compact, unbranded **AI** action beside the draft. The frontend sends only those non-secret preferences to `generate_commit_message`; the Rust command obtains the API key internally and returns only the generated message plus truncation and exclusion metadata. The model selects the Conventional Commit type and optional scope from the staged diff. A successful response fills the editable 72-character draft and never invokes Commit or Push.
+AI generation is an optional draft action, not a commit action. The user stages files, chooses a language, endpoint, model, and whether the final format includes a scope, then explicitly selects the compact, unbranded **AI** action beside the draft. The frontend sends only those non-secret preferences to `generate_commit_message`; the Rust command obtains the API key internally and returns only the generated message plus truncation and exclusion metadata. The model always selects the Conventional Commit type from the staged diff. When scope is enabled, the model also selects the scope name; the user controls only whether that field exists. A successful response fills the editable 72-character draft and never invokes Commit or Push.
 
 The native path applies these boundaries:
 
@@ -324,9 +324,9 @@ The native path applies these boundaries:
 3. Staged paths are passed to Git as literal pathspec arguments after `--`. An empty or oversized selection fails closed instead of falling back to an unscoped diff.
 4. Repository locking ends after context collection. The network request does not hold the Git mutex, and the selection generation is checked before and after the request so a response from an older repository is rejected.
 5. The configured base URL must use HTTPS, except for loopback HTTP used by local services. Credentials in URLs are rejected, redirects are disabled, the request has a 30-second timeout, and provider response bodies never appear in errors.
-6. The staged diff is labelled as untrusted data in the system instruction. The provider is instructed to return exactly one complete Conventional Commit and choose from the supported lowercase types. Rust validates the model-selected type and optional ASCII scope, accepts either ASCII or full-width colon punctuation, normalizes one line, removes trailing punctuation, and truncates the subject so the complete `type(scope): subject` remains within 72 characters.
+6. The staged diff is labelled as untrusted data in the system instruction. The provider is instructed to return exactly one complete Conventional Commit and choose from the supported lowercase types. Scope-off requests require `type: subject`; if a provider still returns a valid scope, Rust removes it so the user's selection wins. Scope-on requests require `type(scope): subject`, with the scope name selected by the model. Rust validates the selected type and ASCII scope, accepts either ASCII or full-width colon punctuation, normalizes one line, removes trailing punctuation, and truncates the subject so the complete result remains within 72 characters.
 
-Non-secret endpoint, model, and output-language preferences use the ordinary Tauri store. Closing the settings dialog clears any unsaved key from React state. Replacing or removing a credential is explicit, and the browser demo never exposes native key controls.
+Non-secret endpoint, model, output-language, and scope-format preferences use the ordinary Tauri store. Closing the settings dialog clears any unsaved key from React state. Replacing or removing a credential is explicit, and the browser demo never exposes native key controls.
 
 ## Remote authentication
 
@@ -373,7 +373,7 @@ The Tauri store contains only local convenience settings:
 - `topSurfaceMonitorName`: the preferred monitor for the island and drawer.
 - `drawerAnchors`: finite normalized horizontal drawer positions keyed independently by monitor identity.
 - `recentRepositories`: a bounded list whose first entry may be restored at startup. For a game project nested below its Git root, the remembered value is the project `selectionPath`, preserving both protocol preapproval and game-aware detection across restarts.
-- `aiCommit`: the non-secret AI Base URL, model name, and output language.
+- `aiCommit`: the non-secret AI Base URL, model name, output language, and `useScope` format preference.
 
 The old single `panelSize` value is read only as a migration fallback for puck mode. Each new mode keeps its own size so resizing the drawer does not unexpectedly reshape the puck or island panel.
 

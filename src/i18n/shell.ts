@@ -28,6 +28,8 @@ export interface ShellCopy {
     aiModel: string;
     commitLanguage: string;
     commitFormatAutomatic: string;
+    useCommitScope: string;
+    useCommitScopeHelp: string;
     apiKey: string;
     apiKeyDescription: string;
     providerKeyScope(provider: string): string;
@@ -191,7 +193,10 @@ const en: ShellCopy = {
     aiModel: "AI model",
     commitLanguage: "Commit language",
     commitFormatAutomatic:
-      "AI chooses the commit type and optional scope from the staged diff.",
+      "AI always chooses the commit type from the staged diff.",
+    useCommitScope: "Include an AI-generated scope",
+    useCommitScopeHelp:
+      "Off: feat: subject · On: feat(scope): subject. AI chooses both the type and scope name.",
     apiKey: "API key",
     apiKeyDescription:
       "The key is stored in Windows Credential Manager and is never written to settings.json.",
@@ -362,7 +367,10 @@ const zhCN: ShellCopy = {
     aiBaseUrlHelp: "兼容 OpenAI 接口；RepoPuck 请求 /chat/completions。",
     aiModel: "AI 模型",
     commitLanguage: "提交信息语言",
-    commitFormatAutomatic: "AI 会根据已暂存的改动自动判断提交类型和可选作用域。",
+    commitFormatAutomatic: "AI 始终根据已暂存的改动判断提交类型。",
+    useCommitScope: "使用 AI 生成的作用域",
+    useCommitScopeHelp:
+      "关闭：feat: 说明；开启：feat(scope): 说明。提交类型和作用域名称均由 AI 判断。",
     apiKey: "API 密钥",
     apiKeyDescription:
       "密钥保存在 Windows 凭据管理器中，不会写入 settings.json。",

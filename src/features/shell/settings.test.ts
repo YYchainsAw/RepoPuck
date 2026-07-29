@@ -30,6 +30,7 @@ describe("AI commit preferences", () => {
       baseUrl: "https://api.openai.com/v1",
       model: "gpt-4.1-mini",
       language: "zh-CN",
+      useScope: false,
     });
   });
 
@@ -78,6 +79,7 @@ describe("AI commit preferences", () => {
       baseUrl: "https://example.test/v1",
       model: "custom-model",
       language: "zh-CN",
+      useScope: false,
     });
   });
 
@@ -87,11 +89,13 @@ describe("AI commit preferences", () => {
         baseUrl: "http://localhost:11434/v1",
         model: "local-model",
         language: "en",
+        useScope: true,
       }),
     ).toEqual({
       baseUrl: "http://localhost:11434/v1",
       model: "local-model",
       language: "en",
+      useScope: true,
     });
   });
 });

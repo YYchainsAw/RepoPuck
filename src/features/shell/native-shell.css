@@ -407,6 +407,10 @@
   grid-column: 1 / -1;
 }
 
+.ai-scope-toggle {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
 .api-key-card {
   background: var(--panel-subtle);
   border: 1px solid var(--panel-border);

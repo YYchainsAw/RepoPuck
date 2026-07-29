@@ -8,6 +8,7 @@ export interface AICommitPreferences {
   baseUrl: string;
   model: string;
   language: AICommitLanguage;
+  useScope: boolean;
 }
 
 export interface ShellSettings {
@@ -37,6 +38,7 @@ export const DEFAULT_AI_COMMIT_PREFERENCES: AICommitPreferences = {
   baseUrl: "https://api.openai.com/v1",
   model: "gpt-4.1-mini",
   language: "zh-CN",
+  useScope: false,
 };
 
 export const DEFAULT_SHELL_SETTINGS: ShellSettings = {
@@ -98,7 +100,11 @@ export function normalizeAICommitPreferences(value: unknown): AICommitPreference
     candidate.language === "en" || candidate.language === "zh-CN"
       ? candidate.language
       : DEFAULT_AI_COMMIT_PREFERENCES.language;
-  return { baseUrl, model, language };
+  const useScope =
+    typeof candidate.useScope === "boolean"
+      ? candidate.useScope
+      : DEFAULT_AI_COMMIT_PREFERENCES.useScope;
+  return { baseUrl, model, language, useScope };
 }
 
 export function getAICommitPreferences(settings: ShellSettings): AICommitPreferences {

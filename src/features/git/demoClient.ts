@@ -131,8 +131,10 @@ export function createDemoGitClient(): GitClient {
           : stagedChanges.some((change) => change.kind === "added")
             ? "feat"
             : "fix";
-      const scope = stagedChanges.every((change) => change.path.startsWith("src/"))
-        ? "ui"
+      const scope = request.useScope
+        ? stagedChanges.every((change) => change.path.startsWith("src/"))
+          ? "ui"
+          : "project"
         : "";
       const prefix = scope ? `${commitType}(${scope}):` : `${commitType}:`;
       const subject =

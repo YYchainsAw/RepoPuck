@@ -1,6 +1,6 @@
 [package]
 name = "repopuck"
-version = "0.2.3"
+version = "0.2.4"
 description = "A tray-first Git client for Windows"
 authors = ["RepoPuck"]
 edition = "2021"
