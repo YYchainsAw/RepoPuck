@@ -2,7 +2,7 @@
 
 RepoPuck is a Windows desktop application built with Tauri 2, Rust, React, and TypeScript. Its main architectural rule is simple: React describes user intent and renders the current state, while Rust owns repository validation, external project activation, Git processes, game-project analysis, shell-mode state, native windows, monitor geometry, and persistence of native placement.
 
-> Version boundary: `v0.2.3` is the current published baseline. This document also follows the active `develop` architecture, including optimistic queued staging, user-selected AI scope formatting, the low-overhead refresh path, cancellable Fetch, provider-isolated AI credentials, and Windows MSI lifecycle smoke tests. The published implementation passed [frontend, Rust, and packaged MSI Release CI](https://github.com/YYchainsAw/RepoPuck/actions/runs/30342011359).
+> Version boundary: `v0.2.4` is the release baseline described by this document, including optimistic queued staging, user-selected AI scope formatting, the low-overhead refresh path, cancellable Fetch, provider-isolated AI credentials, and Windows MSI lifecycle smoke tests. The implementation passed [frontend, Rust, and packaged MSI CI](https://github.com/YYchainsAw/RepoPuck/actions/runs/30423706299).
 
 The application keeps one Git panel and one launcher WebView. The three shell modes change how those two native surfaces are configured; they do not create three separate Git interfaces:
 
