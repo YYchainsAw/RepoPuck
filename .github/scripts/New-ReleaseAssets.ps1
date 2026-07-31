@@ -289,6 +289,8 @@ foreach ($stagePath in @($portableStage, $wingetStage)) {
   }
   New-Item -ItemType Directory -Path $stagePath | Out-Null
 }
+$wingetManifestStage = Join-Path $wingetStage "manifests"
+New-Item -ItemType Directory -Path $wingetManifestStage | Out-Null
 
 $releaseMsiName = "RepoPuck-$Version-windows-x64.msi"
 $portableZipName = "RepoPuck-$Version-windows-x64-portable.zip"
@@ -357,6 +359,7 @@ $zhLocaleManifestName = "$PackageIdentifier.locale.zh-CN.yaml"
 $enLocaleManifestName = "$PackageIdentifier.locale.en-US.yaml"
 
 $versionManifest = @(
+  "# yaml-language-server: `$schema=https://aka.ms/winget-manifest.version.1.12.0.schema.json"
   "PackageIdentifier: $PackageIdentifier"
   "PackageVersion: $Version"
   "DefaultLocale: zh-CN"
@@ -365,6 +368,7 @@ $versionManifest = @(
 ) -join [Environment]::NewLine
 
 $installerManifest = @(
+  "# yaml-language-server: `$schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json"
   "PackageIdentifier: $PackageIdentifier"
   "PackageVersion: $Version"
   "InstallerType: wix"
@@ -385,6 +389,7 @@ $installerManifest = @(
 ) -join [Environment]::NewLine
 
 $zhLocaleManifest = @(
+  "# yaml-language-server: `$schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json"
   "PackageIdentifier: $PackageIdentifier"
   "PackageVersion: $Version"
   "PackageLocale: zh-CN"
@@ -410,6 +415,7 @@ $zhLocaleManifest = @(
 ) -join [Environment]::NewLine
 
 $enLocaleManifest = @(
+  "# yaml-language-server: `$schema=https://aka.ms/winget-manifest.locale.1.12.0.schema.json"
   "PackageIdentifier: $PackageIdentifier"
   "PackageVersion: $Version"
   "PackageLocale: en-US"
@@ -422,16 +428,16 @@ $enLocaleManifest = @(
 ) -join [Environment]::NewLine
 
 Write-Utf8File `
-  -Path (Join-Path $wingetStage $versionManifestName) `
+  -Path (Join-Path $wingetManifestStage $versionManifestName) `
   -Content $versionManifest
 Write-Utf8File `
-  -Path (Join-Path $wingetStage $installerManifestName) `
+  -Path (Join-Path $wingetManifestStage $installerManifestName) `
   -Content $installerManifest
 Write-Utf8File `
-  -Path (Join-Path $wingetStage $zhLocaleManifestName) `
+  -Path (Join-Path $wingetManifestStage $zhLocaleManifestName) `
   -Content $zhLocaleManifest
 Write-Utf8File `
-  -Path (Join-Path $wingetStage $enLocaleManifestName) `
+  -Path (Join-Path $wingetManifestStage $enLocaleManifestName) `
   -Content $enLocaleManifest
 
 $wingetSubmissionNotes = @(
@@ -443,9 +449,9 @@ $wingetSubmissionNotes = @(
   ""
   "1. Confirm the GitHub Release and MSI URL are publicly available."
   "2. Extract this archive to an empty directory."
-  "3. Run ``winget validate <directory>``."
-  "4. Run ``winget install --manifest <directory>`` in Windows Sandbox."
-  "5. Submit the validated directory to microsoft/winget-pkgs."
+  "3. Run ``winget validate .\manifests``."
+  "4. Run ``winget install --manifest .\manifests`` in Windows Sandbox."
+  "5. Submit only the four YAML files under ``manifests`` to microsoft/winget-pkgs."
   ""
   "Generated for $Repository at tag $ReleaseTag."
 ) -join [Environment]::NewLine
@@ -453,21 +459,21 @@ Write-Utf8File `
   -Path (Join-Path $wingetStage "SUBMISSION.md") `
   -Content $wingetSubmissionNotes
 
-$wingetFiles = @(
-  Get-ChildItem -LiteralPath $wingetStage -File |
+$wingetEntries = @(
+  Get-ChildItem -LiteralPath $wingetStage -Force |
     Sort-Object Name
 )
 Compress-Archive `
-  -LiteralPath $wingetFiles.FullName `
+  -LiteralPath $wingetEntries.FullName `
   -DestinationPath $wingetZipPath `
   -CompressionLevel Optimal
 Assert-ZipEntries `
   -Path $wingetZipPath `
   -ExpectedEntries @(
-    $versionManifestName
-    $installerManifestName
-    $zhLocaleManifestName
-    $enLocaleManifestName
+    "manifests/$versionManifestName"
+    "manifests/$installerManifestName"
+    "manifests/$zhLocaleManifestName"
+    "manifests/$enLocaleManifestName"
     "SUBMISSION.md"
   )
 

@@ -14,7 +14,6 @@
 
   <p>
     <a href="https://github.com/YYchainsAw/RepoPuck/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/YYchainsAw/RepoPuck?display_name=tag&style=flat-square&color=1f883d"></a>
-    <a href="https://github.com/YYchainsAw/RepoPuck/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/YYchainsAw/RepoPuck/total?style=flat-square&color=0969da"></a>
     <a href="https://github.com/YYchainsAw/RepoPuck/actions/workflows/ci.yml"><img alt="CI status" src="https://img.shields.io/github/actions/workflow/status/YYchainsAw/RepoPuck/ci.yml?branch=main&style=flat-square&label=CI"></a>
     <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/github/license/YYchainsAw/RepoPuck?style=flat-square&color=8250df"></a>
     <img alt="Windows 10 and 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0969da?style=flat-square&logo=windows11&logoColor=white">
@@ -28,6 +27,10 @@
     <a href="https://github.com/YYchainsAw/RepoPuck/discussions">Discussions</a>
     ·
     <a href="#-contributing">Contributing</a>
+  </p>
+
+  <p>
+    <a href="https://github.com/YYchainsAw/RepoPuck/releases/tag/v0.2.4"><strong>🆕 v0.2.4: choose whether AI commits include a scope →</strong></a>
   </p>
 </div>
 
@@ -46,6 +49,8 @@ RepoPuck keeps everyday Git actions in a small panel that is always close by. Se
   ·
   <strong>Open source for Windows</strong>
 </p>
+
+**RepoPuck has a focused role:** it handles frequent small commits from the desktop. IDE Git tools suit in-editor diffs and conflict resolution, GitHub Desktop provides a complete visual repository workflow, and the Git CLI offers scripting and fine-grained control. Use them together as needed.
 
 ## ✨ Why RepoPuck?
 

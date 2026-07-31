@@ -152,8 +152,27 @@ jobs:
             Remove-Item -LiteralPath $bundleDirectory -Recurse -Force
           }
 
-      - name: Build release MSI
-        run: pnpm tauri build --bundles msi --ci
+      - name: Build release executable
+        run: pnpm tauri build --no-bundle --ci
+
+      # Optional Authenticode signing:
+      # Store a base64-encoded PFX and its password as
+      # WINDOWS_CERTIFICATE_BASE64 and WINDOWS_CERTIFICATE_PASSWORD.
+      # The executable is signed before bundling so the installed copy keeps
+      # the signature. Releases remain unsigned when both secrets are absent.
+      - name: Sign release executable when configured
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          & ".github/scripts/Sign-WindowsArtifact.ps1" `
+            -Path "src-tauri/target/release/repopuck.exe" `
+            -CertificateBase64 $env:WINDOWS_CERTIFICATE_BASE64 `
+            -CertificatePassword $env:WINDOWS_CERTIFICATE_PASSWORD
+
+      - name: Bundle release MSI
+        run: pnpm tauri bundle --bundles msi --ci
 
       - name: Locate tagged-version MSI
         id: msi_bundle
@@ -179,26 +198,17 @@ jobs:
           "msi_path=$($builtMsi.FullName)" >> $env:GITHUB_OUTPUT
           $builtMsi | Select-Object FullName, Length
 
-      # Optional Authenticode signing hook:
-      # 1. Store the base64 PFX and password as WINDOWS_CERTIFICATE_BASE64 and
-      #    WINDOWS_CERTIFICATE_PASSWORD repository secrets.
-      # 2. Restore the PFX under RUNNER_TEMP and import it only for this job.
-      # 3. Sign steps.msi_bundle.outputs.msi_path with signtool.exe here.
-      # 4. Remove the temporary certificate before checksums are generated.
-      # Until that is implemented, releases remain deliberately unsigned and
-      # missing secrets never prevent CI or release builds.
-      - name: Report optional code-signing status
+      - name: Sign release MSI when configured
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          MSI_PATH: ${{ steps.msi_bundle.outputs.msi_path }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) {
-            Write-Host "No Authenticode certificate configured; continuing with an unsigned MSI."
-          }
-          else {
-            Write-Warning `
-              "A signing certificate secret is present, but Authenticode signing is not enabled yet."
-          }
+          & ".github/scripts/Sign-WindowsArtifact.ps1" `
+            -Path $env:MSI_PATH `
+            -CertificateBase64 $env:WINDOWS_CERTIFICATE_BASE64 `
+            -CertificatePassword $env:WINDOWS_CERTIFICATE_PASSWORD
 
       - name: Smoke test silent MSI install and uninstall
         shell: pwsh

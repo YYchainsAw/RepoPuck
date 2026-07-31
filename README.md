@@ -14,7 +14,6 @@
 
   <p>
     <a href="https://github.com/YYchainsAw/RepoPuck/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/YYchainsAw/RepoPuck?display_name=tag&style=flat-square&color=1f883d"></a>
-    <a href="https://github.com/YYchainsAw/RepoPuck/releases"><img alt="下载次数" src="https://img.shields.io/github/downloads/YYchainsAw/RepoPuck/total?style=flat-square&color=0969da"></a>
     <a href="https://github.com/YYchainsAw/RepoPuck/actions/workflows/ci.yml"><img alt="CI 状态" src="https://img.shields.io/github/actions/workflow/status/YYchainsAw/RepoPuck/ci.yml?branch=main&style=flat-square&label=CI"></a>
     <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/github/license/YYchainsAw/RepoPuck?style=flat-square&color=8250df"></a>
     <img alt="Windows 10 和 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0969da?style=flat-square&logo=windows11&logoColor=white">
@@ -28,6 +27,10 @@
     <a href="https://github.com/YYchainsAw/RepoPuck/discussions">讨论与反馈</a>
     ·
     <a href="#-参与贡献">参与贡献</a>
+  </p>
+
+  <p>
+    <a href="https://github.com/YYchainsAw/RepoPuck/releases/tag/v0.2.4"><strong>🆕 v0.2.4：自由选择 AI 提交是否包含作用域 →</strong></a>
   </p>
 </div>
 
@@ -46,6 +49,8 @@ RepoPuck 把最常用的 Git 操作放在一个随叫随到的小面板里。选
   ·
   <strong>Windows 开源</strong>
 </p>
+
+**RepoPuck 的定位很简单：**它负责桌面上高频的小提交；IDE Git 适合编码中的差异与冲突处理，GitHub Desktop 适合完整的图形化仓库工作流，Git CLI 适合脚本化与精细控制。它们可以按需配合使用。
 
 ## ✨ 为什么选择 RepoPuck？
 
