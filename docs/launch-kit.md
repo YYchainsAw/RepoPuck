@@ -29,6 +29,23 @@ commits. Select changes, switch branches, commit locally, or commit and push
 without opening a full Git client. It reuses system Git authentication, requires
 no GitHub sign-in, and keeps BYOK AI commit-message drafts completely optional.
 
+### 当前版本亮点 / Current release hook
+
+- 中文：RepoPuck v0.2.4 允许用户选择 AI 提交信息是否包含作用域，提交类型和可选的作用域名称仍由 AI 根据已暂存内容判断。
+- English: RepoPuck v0.2.4 lets users choose whether AI-generated commits include a scope, while AI still infers the type and optional scope name from staged changes.
+- Release: https://github.com/YYchainsAw/RepoPuck/releases/tag/v0.2.4
+
+### 中立定位 / Neutral comparison
+
+RepoPuck 负责桌面上的高频小提交；IDE Git 适合编码中的差异与冲突处理，
+GitHub Desktop 适合完整图形化仓库工作流，Git CLI 适合脚本化与精细控制。
+这些工具可以按需配合使用。
+
+RepoPuck handles frequent small commits from the desktop. IDE Git tools suit
+in-editor diffs and conflict resolution, GitHub Desktop provides a complete
+visual repository workflow, and the Git CLI offers scripting and fine-grained
+control. They can be used together.
+
 ## Tester invitation
 
 ### 中文
