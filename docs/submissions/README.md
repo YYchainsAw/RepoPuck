@@ -1,15 +1,15 @@
 # RepoPuck distribution and directory submissions
 
-This directory contains maintainer-ready material for third-party package
-catalogs and project directories. It complements `docs/launch-kit.md`; none of
-the items below has been submitted automatically.
+This directory tracks maintainer-ready material and submission status for
+third-party package catalogs and project directories. It complements
+`docs/launch-kit.md`.
 
 Status audited on 2026-07-31:
 
 | Channel | Prepared material | External action still required |
 | --- | --- | --- |
-| WinGet | v0.2.4 manifest candidate, release hash, provenance, and successful `winget validate` result | Run the Sandbox test, open a PR, and complete Microsoft's CLA if prompted |
-| Awesome Tauri | Exact list entry, placement, PR title, and checklist | Fork the repository, create a signed commit, and open a PR against `dev` |
+| WinGet | Submitted as [`microsoft/winget-pkgs#410312`](https://github.com/microsoft/winget-pkgs/pull/410312) after a successful `winget validate` | Complete the Sandbox test or CLA if requested, then address moderator feedback |
+| Awesome Tauri | Submitted as [`tauri-apps/awesome-tauri#828`](https://github.com/tauri-apps/awesome-tauri/pull/828) with a GitHub-verified signed commit | Address maintainer feedback and wait for review |
 | HelloGitHub | Original Chinese title, description, highlights, and media links | Sign in to GitHub and submit the public project-recommendation issue |
 
 Use the individual checklists:

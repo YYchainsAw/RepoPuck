@@ -1,5 +1,13 @@
 # Awesome Tauri submission
 
+## Submission status
+
+RepoPuck was submitted as
+[`tauri-apps/awesome-tauri#828`](https://github.com/tauri-apps/awesome-tauri/pull/828)
+on 2026-07-31. Its single commit is cryptographically signed by GitHub and
+shown as verified. The remaining work is maintainer review and any requested
+follow-up.
+
 RepoPuck fits the **Applications → Developer tools** category in
 [`tauri-apps/awesome-tauri`](https://github.com/tauri-apps/awesome-tauri).
 It is an original open-source application, uses Tauri 2, has an English README,

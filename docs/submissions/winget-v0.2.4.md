@@ -1,5 +1,13 @@
 # WinGet submission checklist for RepoPuck v0.2.4
 
+## Submission status
+
+The validated manifest was submitted upstream as
+[`microsoft/winget-pkgs#410312`](https://github.com/microsoft/winget-pkgs/pull/410312)
+on 2026-07-31. Keep the tracking
+[issue #11](https://github.com/YYchainsAw/RepoPuck/issues/11) open until
+automated validation and moderator review finish.
+
 ## Audit result
 
 The public [v0.2.4 release](https://github.com/YYchainsAw/RepoPuck/releases/tag/v0.2.4)
